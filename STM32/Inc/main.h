@@ -45,6 +45,8 @@ extern DMA2D_HandleTypeDef hdma2d;
 extern I2S_HandleTypeDef hi2s3;
 extern DMA_HandleTypeDef hdma_spi3_rx;
 extern DMA_HandleTypeDef hdma_spi3_tx;
+extern DMA_HandleTypeDef hdma_spi2_rx;
+extern DMA_HandleTypeDef hdma_spi2_tx;
 
 extern RTC_HandleTypeDef hrtc;
 
@@ -65,13 +67,12 @@ extern DMA_HandleTypeDef hdma_usart6_rx;
 
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
-extern DMA_HandleTypeDef hdma_memtomem_dma2_stream7;
-extern DMA_HandleTypeDef hdma_memtomem_dma2_stream6;
 extern DMA_HandleTypeDef hdma_memtomem_dma2_stream5;
-extern DMA_HandleTypeDef hdma_memtomem_dma2_stream4;
 extern MDMA_HandleTypeDef hmdma_mdma_channel40_sw_0;
 extern MDMA_HandleTypeDef hmdma_mdma_channel41_sw_0;
 extern MDMA_HandleTypeDef hmdma_mdma_channel42_sw_0;
+extern MDMA_HandleTypeDef hmdma_mdma_channel43_sw_0;
+extern MDMA_HandleTypeDef hmdma_mdma_channel44_sw_0;
 extern SRAM_HandleTypeDef hsram1;
 
 /* USER CODE END ET */
@@ -178,6 +179,8 @@ void Error_Handler(void);
 #define WM8731_SCK_GPIO_Port GPIOD
 #define WM8731_SDA_Pin GPIO_PIN_6
 #define WM8731_SDA_GPIO_Port GPIOD
+#define AF_AMP_MUTE_Pin GPIO_PIN_5
+#define AF_AMP_MUTE_GPIO_Port GPIOB
 #define RFUNIT_RCLK_Pin GPIO_PIN_6
 #define RFUNIT_RCLK_GPIO_Port GPIOB
 #define RFUNIT_CLK_Pin GPIO_PIN_7

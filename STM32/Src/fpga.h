@@ -7,7 +7,7 @@
 #include "audio_processor.h"
 #include "settings.h"
 
-#define FPGA_flash_size 0x200000
+#define FPGA_flash_size 0x100000
 #define FPGA_flash_file_offset (0xA0 - 1)
 #define FPGA_sector_size (64 * 1024)
 #define FPGA_page_size 256
@@ -40,25 +40,33 @@
 #define M25P80_RELEASE_from_DEEP_POWER_DOWN 0xAB
 
 //Public variables
-extern volatile uint32_t FPGA_samples;                                     // counter of the number of samples when exchanging with FPGA
-extern volatile bool FPGA_Buffer_underrun;                                 // flag of lack of data from FPGA
-extern volatile bool FPGA_NeedSendParams;                                  // flag of the need to send parameters to FPGA
-extern volatile bool FPGA_NeedGetParams;                                   // flag of the need to get parameters from FPGA
-extern volatile bool FPGA_NeedRestart;                                     // flag of necessity to restart FPGA modules
-extern volatile float32_t FPGA_Audio_Buffer_RX1_Q[FPGA_RX_IQ_BUFFER_SIZE]; // FPGA buffers
-extern volatile float32_t FPGA_Audio_Buffer_RX1_I[FPGA_RX_IQ_BUFFER_SIZE];
-extern volatile float32_t FPGA_Audio_Buffer_RX2_Q[FPGA_RX_IQ_BUFFER_SIZE];
-extern volatile float32_t FPGA_Audio_Buffer_RX2_I[FPGA_RX_IQ_BUFFER_SIZE];
+extern volatile uint32_t FPGA_samples;                                            // counter of the number of samples when exchanging with FPGA
+extern volatile bool FPGA_Buffer_underrun;                                        // flag of lack of data from FPGA
+extern volatile bool FPGA_NeedSendParams;                                         // flag of the need to send parameters to FPGA
+extern volatile bool FPGA_NeedGetParams;                                          // flag of the need to get parameters from FPGA
+extern volatile bool FPGA_NeedRestart;                                            // flag of necessity to restart FPGA modules
+extern volatile float32_t FPGA_Audio_Buffer_RX1_Q_A[FPGA_RX_IQ_BUFFER_HALF_SIZE]; // FPGA buffers
+extern volatile float32_t FPGA_Audio_Buffer_RX1_I_A[FPGA_RX_IQ_BUFFER_HALF_SIZE];
+extern volatile float32_t FPGA_Audio_Buffer_RX1_Q_B[FPGA_RX_IQ_BUFFER_HALF_SIZE];
+extern volatile float32_t FPGA_Audio_Buffer_RX1_I_B[FPGA_RX_IQ_BUFFER_HALF_SIZE];
+extern volatile float32_t FPGA_Audio_Buffer_RX2_Q_A[FPGA_RX_IQ_BUFFER_HALF_SIZE];
+extern volatile float32_t FPGA_Audio_Buffer_RX2_I_A[FPGA_RX_IQ_BUFFER_HALF_SIZE];
+extern volatile float32_t FPGA_Audio_Buffer_RX2_Q_B[FPGA_RX_IQ_BUFFER_HALF_SIZE];
+extern volatile float32_t FPGA_Audio_Buffer_RX2_I_B[FPGA_RX_IQ_BUFFER_HALF_SIZE];
 extern volatile float32_t FPGA_Audio_SendBuffer_Q[FPGA_TX_IQ_BUFFER_SIZE];
 extern volatile float32_t FPGA_Audio_SendBuffer_I[FPGA_TX_IQ_BUFFER_SIZE];
+extern bool FPGA_RX_Buffer_Current;
+extern bool FPGA_RX_buffer_ready;
 extern uint_fast16_t FPGA_Audio_RXBuffer_Index; // current index in FPGA buffers
 extern uint_fast16_t FPGA_Audio_TXBuffer_Index; // current index in FPGA buffers
 extern bool FPGA_Audio_Buffer_State;            // buffer state, half or full full true - compleate; false - half
+extern uint16_t FPGA_FW_Version[3];             // version from fpga
+extern bool FPGA_bus_stop;                      //temporary stop FPGA bus
 
 //Public methods
-extern void FPGA_Init(void);                // initialize exchange with FPGA
-extern void FPGA_fpgadata_iqclock(void);    // exchange IQ data with FPGA
-extern void FPGA_fpgadata_stuffclock(void); // exchange parameters with FPGA
-extern void FPGA_restart(void);             // restart FPGA modules
+extern void FPGA_Init(bool bus_test, bool firmware_test); // initialize exchange with FPGA
+extern void FPGA_fpgadata_iqclock(void);                  // exchange IQ data with FPGA
+extern void FPGA_fpgadata_stuffclock(void);               // exchange parameters with FPGA
+extern void FPGA_restart(void);                           // restart FPGA modules
 
 #endif

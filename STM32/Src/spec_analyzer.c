@@ -26,13 +26,13 @@ static bool LastBandMapEnabled = false;
 static bool LastRF_Filters = false;
 static bool LastManualNotch = false;
 static bool LastAutoNotch = false;
-static bool LastDNR = false;
+static uint8_t LastDNR = false;
 static bool LastShift = false;
 static bool LastNB = false;
 static bool LastMute = false;
 
 //Public variables
-bool sysmenu_spectrum_opened = false;
+bool SYSMENU_spectrum_opened = false;
 
 //Prototypes
 static void SPEC_DrawBottomGUI(void);				   // display status at the bottom of the screen
@@ -52,18 +52,18 @@ void SPEC_Start(void)
 	LastRF_Filters = TRX.RF_Filters;
 	LastManualNotch = CurrentVFO()->ManualNotchFilter;
 	LastAutoNotch = CurrentVFO()->AutoNotchFilter;
-	LastDNR = CurrentVFO()->DNR;
+	LastDNR = CurrentVFO()->DNR_Type;
 	LastShift = TRX.ShiftEnabled;
 	LastNB = TRX.NOISE_BLANKER;
 	LastMute = TRX_Mute;
-	
+
 	// draw the GUI
 	LCDDriver_Fill(COLOR_BLACK);
 	LCDDriver_drawFastVLine(graph_start_x, graph_start_y, graph_height, COLOR_WHITE);
 	LCDDriver_drawFastHLine(graph_start_x, graph_start_y + graph_height, graph_width, COLOR_WHITE);
 
 	// horizontal labels
-	char ctmp[64] = {0};
+	static IRAM2 char ctmp[64] = {0};
 	sprintf(ctmp, "%u", TRX.SPEC_Begin);
 	LCDDriver_printText(ctmp, graph_start_x + 2, graph_start_y + graph_height + 3, COLOR_GREEN, COLOR_BLACK, 1);
 	sprintf(ctmp, "%u", TRX.SPEC_End);
@@ -91,7 +91,7 @@ void SPEC_Start(void)
 	TRX_setMode(TRX_MODE_CW_U, CurrentVFO());
 	CurrentVFO()->ManualNotchFilter = false;
 	CurrentVFO()->AutoNotchFilter = false;
-	CurrentVFO()->DNR = false;
+	CurrentVFO()->DNR_Type = false;
 	TRX_Mute = true;
 	FPGA_NeedSendParams = true;
 	now_freq = TRX.SPEC_Begin * SPEC_Resolution;
@@ -113,7 +113,7 @@ void SPEC_Stop(void)
 	TRX.RF_Filters = LastRF_Filters;
 	CurrentVFO()->ManualNotchFilter = LastManualNotch;
 	CurrentVFO()->AutoNotchFilter = LastAutoNotch;
-	CurrentVFO()->DNR = LastDNR;
+	CurrentVFO()->DNR_Type = LastDNR;
 	TRX.ShiftEnabled = LastShift;
 	TRX.NOISE_BLANKER = LastNB;
 	TRX_Mute = LastMute;
@@ -195,7 +195,7 @@ static void SPEC_DrawGraphCol(uint16_t x, bool clear)
 // display status at the bottom of the screen
 static void SPEC_DrawBottomGUI(void)
 {
-	char ctmp[64] = {0};
+	static IRAM2 char ctmp[64] = {0};
 	int32_t freq = (int32_t)TRX.SPEC_Begin + (graph_selected_x * (int32_t)(TRX.SPEC_End - TRX.SPEC_Begin) / (graph_width - 1));
 	sprintf(ctmp, "Freq=%dkHz DBM=%d", freq, data[graph_selected_x]);
 	LCDDriver_Fill_RectWH(170, graph_start_y + graph_height + 3, 200, 6, COLOR_BLACK);
@@ -206,7 +206,7 @@ static void SPEC_DrawBottomGUI(void)
 // analyzer events to the encoder
 void SPEC_EncRotate(int8_t direction)
 {
-	if(LCD_busy)
+	if (LCD_busy)
 		return;
 	LCD_busy = true;
 	// erase the old marker

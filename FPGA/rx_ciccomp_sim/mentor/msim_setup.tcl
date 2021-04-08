@@ -1,5 +1,5 @@
 
-# (C) 2001-2020 Altera Corporation. All rights reserved.
+# (C) 2001-2021 Altera Corporation. All rights reserved.
 # Your use of Altera Corporation's design tools, logic functions and 
 # other software and tools, and its AMPP partner logic functions, and 
 # any output files any of the foregoing (including device programming 
@@ -94,7 +94,7 @@
 # within the Quartus project, and generate a unified
 # script which supports all the Altera IP within the design.
 # ----------------------------------------
-# ACDS 18.1 625 win32 2020.12.06.01:01:45
+# ACDS 18.1 625 win32 2021.03.19.13:30:17
 
 # ----------------------------------------
 # Initialize variables
@@ -142,6 +142,7 @@ if ![ string match "*-64 vsim*" [ vsim -version ] ] {
 alias file_copy {
   echo "\[exec\] file_copy"
   file copy -force $QSYS_SIMDIR/rx_ciccomp_rtl_core_u0_m0_wo0_cm0_lutmem.hex ./
+  file copy -force $QSYS_SIMDIR/rx_ciccomp_rtl_core_u0_m0_wo0_wi0_r0_ra0_count1_lut_lutmem.hex ./
 }
 
 # ----------------------------------------

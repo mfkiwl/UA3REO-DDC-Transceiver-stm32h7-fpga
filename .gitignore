@@ -7,14 +7,15 @@ Scheme/EXPERIMANTAL/__Previews/*
 Scheme/ALTIUM_DESIGNER/*/__Previews/*
 Scheme/EXPERIMANTAL/*/__Previews/*
 Scheme/ALTIUM_DESIGNER/*/History/*
-STM32/MDK-ARM/WOLF/WOLF.build_log.htm
-STM32/MDK-ARM/WOLF/WOLF.htm
+STM32/MDK-ARM/WOLF/*.htm
+STM32/MDK-ARM/WOLF/*.hex
 STM32/Debug/*
 Status Report.txt
 Design Rule Check*
 *~*.zip
 *.log
 *.o
+*.lnp
 *.bak
 *.d
 *.smsg
@@ -27,7 +28,6 @@ Design Rule Check*
 *.axf
 *.map
 *.dep
-*.hex
 *.jic
 *.pof
 *.rpt

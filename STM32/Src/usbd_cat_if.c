@@ -7,6 +7,7 @@
 #include "fpga.h"
 #include "audio_filters.h"
 #include "wifi.h"
+#include "vad.h"
 
 #define CAT_APP_RX_DATA_SIZE 32
 #define CAT_APP_TX_DATA_SIZE 32
@@ -19,6 +20,7 @@ static uint8_t CAT_UserRxBufferFS[CAT_APP_RX_DATA_SIZE];
 static uint8_t CAT_UserTxBufferFS[CAT_APP_TX_DATA_SIZE];
 static bool CAT_processingWiFiCommand = false;
 static uint32_t CAT_processingWiFi_link_id = 0;
+static uint8_t lineCoding[7] = {0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08}; // 115200bps, 1stop, no parity, 8bit
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
@@ -26,7 +28,7 @@ static uint8_t getFT450Mode(uint8_t VFO_Mode);
 static uint8_t setFT450Mode(char *FT450_Mode);
 static int8_t CAT_Init_FS(void);
 static int8_t CAT_DeInit_FS(void);
-static int8_t CAT_Control_FS(uint8_t cmd);
+static int8_t CAT_Control_FS(uint8_t cmd, uint8_t *pbuf);
 static int8_t CAT_Receive_FS(uint8_t *pbuf, uint32_t *Len);
 static void CAT_Transmit(char *data);
 static uint8_t CAT_Transmit_FS(uint8_t *Buf, uint16_t Len);
@@ -66,7 +68,7 @@ static int8_t CAT_DeInit_FS(void)
   * @param  length: Number of data to be sent (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-static int8_t CAT_Control_FS(uint8_t cmd)
+static int8_t CAT_Control_FS(uint8_t cmd, uint8_t *pbuf)
 {
 	/* USER CODE BEGIN 5 */
 	switch (cmd)
@@ -109,11 +111,11 @@ static int8_t CAT_Control_FS(uint8_t cmd)
 		/* 6      | bDataBits  |   1   | Number Data bits (5, 6, 7, 8 or 16).          */
 		/*******************************************************************************/
 	case CDC_SET_LINE_CODING:
-
+		dma_memcpy(lineCoding, pbuf, sizeof(lineCoding));
 		break;
 
 	case CDC_GET_LINE_CODING:
-
+		dma_memcpy(pbuf, lineCoding, sizeof(lineCoding));
 		break;
 
 	case CDC_SET_CONTROL_LINE_STATE:
@@ -160,17 +162,17 @@ static int8_t CAT_Receive_FS(uint8_t *Buf, uint32_t *Len)
 				if (cat_buffer[cat_buffer_head] == ';')
 				{
 					CAT_processingWiFiCommand = false;
-					memset(&command_to_parse, 0, CAT_BUFFER_SIZE);
-					memcpy(command_to_parse, cat_buffer, cat_buffer_head);
+					dma_memset(&command_to_parse, 0, CAT_BUFFER_SIZE);
+					dma_memcpy(command_to_parse, cat_buffer, cat_buffer_head);
 					cat_buffer_head = 0;
-					memset(&cat_buffer, 0, CAT_BUFFER_SIZE);
+					dma_memset(&cat_buffer, 0, CAT_BUFFER_SIZE);
 					continue;
 				}
 				cat_buffer_head++;
 				if (cat_buffer_head >= CAT_BUFFER_SIZE)
 				{
 					cat_buffer_head = 0;
-					memset(&cat_buffer, 0, CAT_BUFFER_SIZE);
+					dma_memset(&cat_buffer, 0, CAT_BUFFER_SIZE);
 				}
 			}
 		}
@@ -217,8 +219,8 @@ void CAT_SetWIFICommand(char *data, uint32_t length, uint32_t link_id)
 {
 	CAT_processingWiFiCommand = true;
 	CAT_processingWiFi_link_id = link_id;
-	memset(&command_to_parse, 0, CAT_BUFFER_SIZE);
-	memcpy(command_to_parse, data, length);
+	dma_memset(&command_to_parse, 0, CAT_BUFFER_SIZE);
+	dma_memcpy(command_to_parse, data, length);
 	ua3reo_dev_cat_parseCommand();
 }
 
@@ -230,8 +232,8 @@ void ua3reo_dev_cat_parseCommand(void)
 
 	char _command_buffer[CAT_BUFFER_SIZE] = {0};
 	char *_command = _command_buffer;
-	memcpy(_command, command_to_parse, CAT_BUFFER_SIZE);
-	memset(&command_to_parse, 0, CAT_BUFFER_SIZE);
+	dma_memcpy(_command, command_to_parse, CAT_BUFFER_SIZE);
+	dma_memset(&command_to_parse, 0, CAT_BUFFER_SIZE);
 	while (*_command == '\r' || *_command == '\n' || *_command == ' ') //trim
 		_command++;
 	if (strlen(_command) < 2)
@@ -271,7 +273,7 @@ void ua3reo_dev_cat_parseCommand(void)
 		}
 		else
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -291,7 +293,7 @@ void ua3reo_dev_cat_parseCommand(void)
 			{
 			} //SPLIT DONT SUPPOTED
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -311,10 +313,18 @@ void ua3reo_dev_cat_parseCommand(void)
 				TRX.current_vfo = 0;
 			else if (strcmp(arguments, "1") == 0)
 				TRX.current_vfo = 1;
+			LCD_UpdateQuery.TopButtons = true;
+			LCD_UpdateQuery.BottomButtons = true;
+			LCD_UpdateQuery.FreqInfoRedraw = true;
+			LCD_UpdateQuery.StatusInfoGUI = true;
+			LCD_UpdateQuery.StatusInfoBarRedraw = true;
 			NeedSaveSettings = true;
+			NeedReinitAudioFiltersClean = true;
 			NeedReinitAudioFilters = true;
-			LCD_redraw();
-			sendToDebug_str3("CAT arguments: ", _command, "\r\n");
+			resetVAD();
+			FFT_Init();
+			TRX_ScanMode = false;
+			println("CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -342,7 +352,7 @@ void ua3reo_dev_cat_parseCommand(void)
 		}
 		else
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -399,14 +409,14 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
 			if (strcmp(arguments, "0") == 0)
 				CAT_Transmit("RA00;");
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -415,7 +425,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -427,7 +437,7 @@ void ua3reo_dev_cat_parseCommand(void)
 					CAT_Transmit("PA00;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -449,7 +459,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				//power on
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -458,7 +468,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -476,7 +486,7 @@ void ua3reo_dev_cat_parseCommand(void)
 					CAT_Transmit("GT01;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -485,7 +495,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -523,7 +533,7 @@ void ua3reo_dev_cat_parseCommand(void)
 		}
 		else
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -532,7 +542,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -548,7 +558,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -557,7 +567,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				CAT_Transmit("NB00;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -566,7 +576,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -575,7 +585,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				CAT_Transmit("NR00;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -588,7 +598,7 @@ void ua3reo_dev_cat_parseCommand(void)
 		}
 		else
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -597,7 +607,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -606,7 +616,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				CAT_Transmit("CT00;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -615,7 +625,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -624,7 +634,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				CAT_Transmit("ML00;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -633,7 +643,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -642,7 +652,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				CAT_Transmit("BP00000;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -655,7 +665,7 @@ void ua3reo_dev_cat_parseCommand(void)
 		}
 		else
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -664,7 +674,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -673,7 +683,7 @@ void ua3reo_dev_cat_parseCommand(void)
 				CAT_Transmit("OS00;");
 			}
 			else
-				sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+				println("Unknown CAT arguments: ", _command);
 		}
 		return;
 	}
@@ -682,7 +692,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -696,7 +706,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			sendToDebug_str3("Unknown CAT arguments: ", _command, "\r\n");
+			println("Unknown CAT arguments: ", _command);
 		}
 		else
 		{
@@ -710,7 +720,7 @@ void ua3reo_dev_cat_parseCommand(void)
 	{
 		if (!has_args)
 		{
-			if (TRX_ptt_cat)
+			if (TRX_ptt_soft)
 				CAT_Transmit("TX1;");
 			else if (TRX_ptt_hard)
 				CAT_Transmit("TX2;");
@@ -721,17 +731,17 @@ void ua3reo_dev_cat_parseCommand(void)
 		{
 			if (strcmp(arguments, "0") == 0)
 			{
-				TRX_ptt_cat = false;
+				TRX_ptt_soft = false;
 			}
 			if (strcmp(arguments, "1") == 0)
 			{
-				TRX_ptt_cat = true;
+				TRX_ptt_soft = true;
 			}
 		}
 		return;
 	}
 
-	sendToDebug_str3("Unknown CAT command: ", _command, "\r\n");
+	println("Unknown CAT command: ", _command);
 	//sendToDebug_str2(command,"|\r\n");
 	//sendToDebug_str2(arguments,"|\r\n");
 }
@@ -785,6 +795,6 @@ static uint8_t setFT450Mode(char *FT450_Mode)
 		return TRX_MODE_NFM;
 	if (strcmp(FT450_Mode, "05") == 0)
 		return TRX_MODE_AM;
-	sendToDebug_str3("Unknown mode ", FT450_Mode, "\r\n");
+	println("Unknown mode ", FT450_Mode);
 	return TRX_MODE_USB;
 }

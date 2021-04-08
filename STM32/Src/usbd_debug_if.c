@@ -5,19 +5,21 @@
 
 #define DEBUG_APP_RX_DATA_SIZE 8
 #define DEBUG_APP_TX_DATA_SIZE 64
+#define DEBUG_RX_FIFO_BUFFER_SIZE 128
 #define DEBUG_TX_FIFO_BUFFER_SIZE 4096
 
 static uint8_t DEBUG_UserRxBufferFS[DEBUG_APP_RX_DATA_SIZE];
 static uint8_t DEBUG_UserTxBufferFS[DEBUG_APP_TX_DATA_SIZE];
-static IRAM2 uint8_t debug_tx_fifo[DEBUG_TX_FIFO_BUFFER_SIZE] = {0};
+static SRAM uint8_t debug_tx_fifo[DEBUG_TX_FIFO_BUFFER_SIZE] = {0};
 static uint16_t debug_tx_fifo_head = 0;
 static uint16_t debug_tx_fifo_tail = 0;
+static uint8_t lineCoding[7] = {0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08}; // 115200bps, 1stop, no parity, 8bit
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
 static int8_t DEBUG_Init_FS(void);
 static int8_t DEBUG_DeInit_FS(void);
-static int8_t DEBUG_Control_FS(uint8_t cmd, uint8_t *pbuf);
+static int8_t DEBUG_Control_FS(uint8_t cmd, uint8_t *pbuf, uint32_t len);
 static int8_t DEBUG_Receive_FS(uint8_t *pbuf);
 
 USBD_DEBUG_ItfTypeDef USBD_DEBUG_fops_FS =
@@ -60,10 +62,9 @@ static int8_t DEBUG_DeInit_FS(void)
   * @param  length: Number of data to be sent (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-static int8_t DEBUG_Control_FS(uint8_t cmd, uint8_t *pbuf)
+static int8_t DEBUG_Control_FS(uint8_t cmd, uint8_t *pbuf, uint32_t len)
 {
 	/* USER CODE BEGIN 5 */
-
 	switch (cmd)
 	{
 	case CDC_SEND_ENCAPSULATED_COMMAND:
@@ -99,9 +100,11 @@ static int8_t DEBUG_Control_FS(uint8_t cmd, uint8_t *pbuf)
 		/* 6      | bDataBits  |   1   | Number Data bits (5, 6, 7, 8 or 16).          */
 		/*******************************************************************************/
 	case CDC_SET_LINE_CODING:
+		dma_memcpy(lineCoding, pbuf, sizeof(lineCoding));
 		break;
 
 	case CDC_GET_LINE_CODING:
+		dma_memcpy(pbuf, lineCoding, sizeof(lineCoding));
 		break;
 
 	case CDC_SET_CONTROL_LINE_STATE:
@@ -113,11 +116,9 @@ static int8_t DEBUG_Control_FS(uint8_t cmd, uint8_t *pbuf)
 
 	case CDC_SEND_BREAK:
 		break;
-
 	default:
 		break;
 	}
-
 	return (USBD_OK);
 	/* USER CODE END 5 */
 }
@@ -183,7 +184,7 @@ void DEBUG_Transmit_FIFO(uint8_t *data, uint16_t length)
 				uint_fast16_t tryes = 0;
 				while (DEBUG_Transmit_FIFO_Events() == USBD_BUSY && tryes < 512)
 					tryes++;
-				if(DEBUG_Transmit_FIFO_Events() == USBD_BUSY)
+				if (DEBUG_Transmit_FIFO_Events() == USBD_BUSY)
 					break;
 			}
 			if (debug_tx_fifo_head >= DEBUG_TX_FIFO_BUFFER_SIZE)
@@ -191,7 +192,7 @@ void DEBUG_Transmit_FIFO(uint8_t *data, uint16_t length)
 		}
 }
 
-IRAM2 static uint8_t temp_buff[DEBUG_TX_FIFO_BUFFER_SIZE] = {0};
+SRAM static uint8_t temp_buff[DEBUG_TX_FIFO_BUFFER_SIZE] = {0};
 static bool FIFO_Events_busy = false;
 uint8_t DEBUG_Transmit_FIFO_Events(void)
 {
@@ -204,7 +205,7 @@ uint8_t DEBUG_Transmit_FIFO_Events(void)
 		return USBD_FAIL;
 	FIFO_Events_busy = true;
 	uint16_t indx = 0;
-	memset(temp_buff, 0x00, DEBUG_TX_FIFO_BUFFER_SIZE);
+	dma_memset(temp_buff, 0x00, DEBUG_TX_FIFO_BUFFER_SIZE);
 
 	if (debug_tx_fifo_tail > debug_tx_fifo_head)
 	{

@@ -5,21 +5,27 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define ENUM_MAX_COUNT 8
+#define ENUM_MAX_LENGTH 10
+
 typedef enum
 {
-	SYSMENU_BOOLEAN = 0x01,
-	SYSMENU_RUN = 0x02,
-	SYSMENU_UINT8 = 0x03,
-	SYSMENU_UINT16 = 0x04,
-	SYSMENU_UINT32 = 0x05,
-	SYSMENU_UINT32R = 0x06,
-	SYSMENU_INT8 = 0x07,
-	SYSMENU_INT16 = 0x08,
-	SYSMENU_INT32 = 0x09,
-	SYSMENU_FLOAT32 = 0x0A,
-	SYSMENU_MENU = 0x0B,
-	SYSMENU_HIDDEN_MENU = 0x0C,
-	SYSMENU_INFOLINE = 0x0D,
+	SYSMENU_BOOLEAN,
+	SYSMENU_RUN,
+	SYSMENU_UINT8,
+	SYSMENU_UINT16,
+	SYSMENU_UINT32,
+	SYSMENU_UINT32R,
+	SYSMENU_INT8,
+	SYSMENU_INT16,
+	SYSMENU_INT32,
+	SYSMENU_FLOAT32,
+	SYSMENU_MENU,
+	SYSMENU_HIDDEN_MENU,
+	SYSMENU_INFOLINE,
+	SYSMENU_FUNCBUTTON,
+	SYSMENU_ENUM,
+	SYSMENU_ENUMR,
 } SystemMenuType;
 
 struct sysmenu_item_handler
@@ -28,16 +34,18 @@ struct sysmenu_item_handler
 	SystemMenuType type;
 	uint32_t *value;
 	void (*menuHandler)(int8_t direction);
+	char enumerate[ENUM_MAX_COUNT][ENUM_MAX_LENGTH];
 };
 
-extern void drawSystemMenu(bool draw_background);
-extern void eventRotateSystemMenu(int8_t direction);
-extern void eventSecEncoderClickSystemMenu(void);
-extern void eventSecRotateSystemMenu(int8_t direction);
-extern void eventCloseSystemMenu(void);
-extern void eventCloseAllSystemMenu(void);
-extern bool sysmenu_spectrum_opened;
-extern bool sysmenu_hiddenmenu_enabled;
+extern void SYSMENU_drawSystemMenu(bool draw_background);
+extern void SYSMENU_redrawCurrentItem(void);
+extern void SYSMENU_eventRotateSystemMenu(int8_t direction);
+extern void SYSMENU_eventSecEncoderClickSystemMenu(void);
+extern void SYSMENU_eventSecRotateSystemMenu(int8_t direction);
+extern void SYSMENU_eventCloseSystemMenu(void);
+extern void SYSMENU_eventCloseAllSystemMenu(void);
+extern bool SYSMENU_spectrum_opened;
+extern bool SYSMENU_hiddenmenu_enabled;
 extern void SYSMENU_TRX_RFPOWER_HOTKEY(void);
 extern void SYSMENU_TRX_STEP_HOTKEY(void);
 extern void SYSMENU_CW_WPM_HOTKEY(void);

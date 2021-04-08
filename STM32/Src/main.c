@@ -23,6 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "settings.h"
 #include "lcd_driver.h"
 #include "functions.h"
 #include "bootloader.h"
@@ -34,13 +35,13 @@
 #include "fft.h"
 #include "wm8731.h"
 #include "audio_processor.h"
-#include "settings.h"
 #include "profiler.h"
 #include "usb_device.h"
 #include "usbd_cat_if.h"
 #include "usbd_debug_if.h"
 #include "wifi.h"
 #include "images.h"
+#include "sd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,9 +55,6 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wunused-function"
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -71,6 +69,8 @@ DMA_HandleTypeDef hdma_spi3_tx;
 RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi2;
+DMA_HandleTypeDef hdma_spi2_rx;
+DMA_HandleTypeDef hdma_spi2_tx;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
@@ -87,13 +87,12 @@ DMA_HandleTypeDef hdma_usart6_rx;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
-DMA_HandleTypeDef hdma_memtomem_dma2_stream7;
-DMA_HandleTypeDef hdma_memtomem_dma2_stream6;
-DMA_HandleTypeDef hdma_memtomem_dma2_stream4;
 DMA_HandleTypeDef hdma_memtomem_dma2_stream5;
 MDMA_HandleTypeDef hmdma_mdma_channel40_sw_0;
 MDMA_HandleTypeDef hmdma_mdma_channel41_sw_0;
 MDMA_HandleTypeDef hmdma_mdma_channel42_sw_0;
+MDMA_HandleTypeDef hmdma_mdma_channel43_sw_0;
+MDMA_HandleTypeDef hmdma_mdma_channel44_sw_0;
 SRAM_HandleTypeDef hsram1;
 
 /* USER CODE BEGIN PV */
@@ -103,6 +102,7 @@ static char greetings_buff[32] = {0};
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void PeriphCommonClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
@@ -141,7 +141,7 @@ static void MX_TIM2_Init(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-	MX_GPIO_Init(); // pwr hold
+  MX_GPIO_Init(); // pwr hold
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -164,20 +164,41 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
+  /* Configure the peripherals common clocks */
+  PeriphCommonClock_Config();
+
   /* USER CODE BEGIN SysInit */
   //System stabilization
   uint8_t tryes = 0;
-	while (tryes < 3 && (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY) || (RCC->CR & RCC_CR_HSERDY) == 0 || (RCC->CR & RCC_CR_PLL1RDY) == 0 || (RCC->CR & RCC_CR_PLL2RDY) == 0 || (RCC->CR & RCC_CR_PLL3RDY) == 0 || (RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL1))
+  //while (tryes < 3 && (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY) || (RCC->CR & RCC_CR_HSERDY) == 0 || (RCC->CR & RCC_CR_PLL1RDY) == 0 || (RCC->CR & RCC_CR_PLL2RDY) == 0 || (RCC->CR & RCC_CR_PLL3RDY) == 0 || (RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL1))
+  while (tryes < 3 && (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY) || (RCC->CR & RCC_CR_HSERDY) == 0 || (RCC->BDCR & RCC_BDCR_LSERDY) == 0 || (RCC->CR & RCC_CR_PLL1RDY) == 0 || (RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL1))
   {
     SystemClock_Config();
-		tryes++;
+    tryes++;
   }
-	if(tryes == 3)
-	{
-		MX_FMC_Init();
-		LCD_Init();
-		LCD_showError("STM32 crystals error", false);
-	}
+  if (tryes == 3)
+  {
+    MX_FMC_Init();
+    LCD_Init();
+    LCD_showError("STM32 crystals error", false);
+  }
+
+//Stack protection
+#define stack_addr 0x20000000
+  MPU_Region_InitTypeDef MPU_InitStruct = {0};
+  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+  MPU_InitStruct.Number = MPU_REGION_NUMBER4;
+  MPU_InitStruct.BaseAddress = stack_addr + 256; //growning down
+  MPU_InitStruct.Size = MPU_REGION_SIZE_32B;
+  MPU_InitStruct.SubRegionDisable = 0x0;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+  MPU_InitStruct.AccessPermission = MPU_REGION_NO_ACCESS;
+  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
+  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -203,86 +224,123 @@ int main(void)
   MX_DMA2D_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+#ifdef HAS_TOUCHPAD
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = ENC2SW_AND_TOUCHPAD_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+#endif
   __HAL_RCC_CSI_ENABLE();
   __HAL_RCC_SYSCFG_CLK_ENABLE();
-	__HAL_RCC_BKPRAM_CLK_ENABLE();
+  __HAL_RCC_BKPRAM_CLK_ENABLE();
   HAL_EnableCompensationCell();
-  sendToDebug_str("\r\n----------------------------------\r\n");
-  sendToDebug_strln("Wolf Transceiver Initialization...");
+  println("\r\n----------------------------------");
+  println("Wolf Transceiver Initialization...");
   InitSettings();
-  sendToDebug_strln("[OK] USB init");
+  println("[OK] USB init");
   USBD_Restart();
-  sendToDebug_strln("[OK] FIFO timer TIM7 init");
+  println("[OK] FIFO timer TIM7 init");
   HAL_TIM_Base_Start_IT(&htim7);
-	sendToDebug_strln("[OK] Real Time Clock init");
+  println("[OK] Real Time Clock init");
   HAL_RTC_Init(&hrtc);
-	sendToDebug_strln("[OK] Frontpanel init");
+  println("[OK] Frontpanel init");
   FRONTPANEL_Init();
-	sendToDebug_strln("[OK] Settings loading");
-  if (PERIPH_FrontPanel_Buttons[13].state) //soft reset
+
+  println("[OK] Settings loading");
+#ifdef FRONTPANEL_SMALL_V1
+  if (PERIPH_FrontPanel_Buttons[15].state) //soft reset (MENU)
     LoadSettings(true);
   else
+#endif
+#if FRONTPANEL_BIG_V1
+      if (PERIPH_FrontPanel_Buttons[20].state) //soft reset (F1)
+    LoadSettings(true);
+  else
+#endif
     LoadSettings(false);
-	sendToDebug_strln("[OK] LCD init");
+
+  TRX.Locked = false;
+  println("[OK] LCD init");
   LCD_busy = true;
   LCD_Init();
   if (SHOW_LOGO)
-	{
-		LCDDriver_Fill(rgb888torgb565(243, 243, 243));
+  {
+    LCDDriver_Fill(rgb888torgb565(243, 243, 243));
     LCDDriver_printImage_RLECompressed(((LCD_WIDTH - IMAGES_logo.width) / 2), ((LCD_HEIGHT - IMAGES_logo.height) / 2), &IMAGES_logo, BG_COLOR, BG_COLOR);
-		LCDDriver_printText(version_string, 10, (LCD_HEIGHT - 10 - 8), COLOR_RED, rgb888torgb565(243, 243, 243), 1);
-		//show callsign greetings
-		uint16_t x1, y1, w, h;
-		strcat(greetings_buff, "Hello, ");
-		strcat(greetings_buff, TRX.CALLSIGN);
-		strcat(greetings_buff, " !");
-		LCDDriver_getTextBounds(greetings_buff, LAYOUT->GREETINGS_X, LAYOUT->GREETINGS_Y, &x1, &y1, &w, &h, &FreeSans9pt7b);
-		LCDDriver_printTextFont(greetings_buff, LAYOUT->GREETINGS_X - (w / 2), LAYOUT->GREETINGS_Y, COLOR->GREETINGS, rgb888torgb565(243, 243, 243), &FreeSans9pt7b);
-	}
-  sendToDebug_strln("[OK] Profiler init");
+    LCDDriver_printText(version_string, 10, (LCD_HEIGHT - 10 - 8), COLOR_RED, rgb888torgb565(243, 243, 243), 1);
+    //show callsign greetings
+    uint16_t x1, y1, w, h;
+    strcat(greetings_buff, "Hello, ");
+    strcat(greetings_buff, TRX.CALLSIGN);
+    strcat(greetings_buff, " !");
+    LCDDriver_getTextBounds(greetings_buff, LAYOUT->GREETINGS_X, LAYOUT->GREETINGS_Y, &x1, &y1, &w, &h, &FreeSans9pt7b);
+    LCDDriver_printTextFont(greetings_buff, LAYOUT->GREETINGS_X - (w / 2), LAYOUT->GREETINGS_Y, COLOR->GREETINGS, rgb888torgb565(243, 243, 243), &FreeSans9pt7b);
+  }
+  println("[OK] Profiler init");
   InitProfiler();
-  sendToDebug_strln("[OK] Calibration loading");
-  if (PERIPH_FrontPanel_Buttons[13].state && PERIPH_FrontPanel_Buttons[0].state) //Very hard reset
+
+  println("[OK] Calibration loading");
+#ifdef FRONTPANEL_SMALL_V1
+  if (PERIPH_FrontPanel_Buttons[15].state && PERIPH_FrontPanel_Buttons[0].state) //Very hard reset (MENU+PRE)
     LoadCalibration(true);
   else
+#endif
+#ifdef FRONTPANEL_BIG_V1
+      if (PERIPH_FrontPanel_Buttons[20].state && PERIPH_FrontPanel_Buttons[10].state) //Very hard reset (F1+F8)
+    LoadCalibration(true);
+  else
+#endif
     LoadCalibration(false);
-  sendToDebug_strln("[OK] FPGA init");
-  FPGA_Init();
-	sendToDebug_strln("[OK] STM32-ADC Calibration");
+
+  println("[OK] RTC calibration");
+  RTC_Calibration();
+
+  println("[OK] FPGA init");
+#ifdef FRONTPANEL_SMALL_V1
+  if (PERIPH_FrontPanel_Buttons[19].state) //fpga bus test (MODE+)
+    FPGA_Init(true, false);
+  if (PERIPH_FrontPanel_Buttons[20].state) //fpga firmware test (MODE-)
+    FPGA_Init(false, true);
+  else
+#endif
+    FPGA_Init(false, false);
+  println("[OK] STM32-ADC Calibration");
   HAL_ADCEx_Calibration_Start(&hadc1, LL_ADC_CALIB_OFFSET_LINEARITY, ADC_SINGLE_ENDED);
   HAL_ADCEx_Calibration_Start(&hadc3, LL_ADC_CALIB_OFFSET_LINEARITY, ADC_SINGLE_ENDED);
-  sendToDebug_strln("[OK] RF-Unit init");
+  println("[OK] RF-Unit init");
   RF_UNIT_UpdateState(false);
-  sendToDebug_strln("[OK] FFT/Waterfall & TIM4 init");
+  println("[OK] FFT/Waterfall & TIM4 init");
+  FFT_PreInit();
   FFT_Init();
   HAL_TIM_Base_Start_IT(&htim4);
-  sendToDebug_strln("[OK] AudioCodec init");
+  println("[OK] AudioCodec init");
   WM8731_Init();
-  sendToDebug_strln("[OK] TRX init");
+  println("[OK] TRX init");
   TRX_Init();
-  sendToDebug_strln("[OK] Audioprocessor & TIM5 init");
+  println("[OK] Audioprocessor & TIM5 init");
   initAudioProcessor();
   HAL_TIM_Base_Start_IT(&htim5);
   if (SHOW_LOGO)
     HAL_Delay(1500); //logo wait
   LCD_busy = false;
-  LCD_redraw();
-	sendToDebug_strln("[OK] Misc timer TIM6 init");
+  LCD_redraw(true);
+  println("[OK] Misc timer TIM6 init");
   HAL_TIM_Base_Start_IT(&htim6);
-	sendToDebug_strln("[OK] CPU Load init");
+  println("[OK] CPU Load init");
   CPULOAD_Init();
   TRX_Inited = true;
-  sendToDebug_strln("[OK] WIFI timer TIM3 init");
+  println("[OK] WIFI timer TIM3 init");
   HAL_TIM_Base_Start_IT(&htim3);
-  sendToDebug_strln("[OK] ENC2 timer TIM16 init");
+  println("[OK] ENC2 timer TIM16 init");
   HAL_TIM_Base_Start_IT(&htim16);
-  sendToDebug_strln("[OK] PERIPHERAL timer TIM15 init");
+  println("[OK] PERIPHERAL timer TIM15 init");
+  dma_memset(&SDFatFs, 0, sizeof(SDFatFs));
   HAL_TIM_Base_Start_IT(&htim15);
-  sendToDebug_strln("[OK] Digital decoder timer TIM17 init");
+  println("[OK] Digital decoder timer TIM17 init");
   HAL_TIM_Base_Start_IT(&htim17);
-  sendToDebug_str("UA3REO Transceiver started!\r\n\r\n");
-	TRX_STM32_VREF = TRX_getSTM32H743vref();
-	//while(true){HAL_Delay(3000); SCB->AIRCR = 0x05FA0004; } //debug restart
+  println("UA3REO Transceiver started!\r\n");
+  //while(true){HAL_Delay(3000); SCB->AIRCR = 0x05FA0004; } //debug restart
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -307,7 +365,6 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
   /** Supply configuration update enable
   */
@@ -316,7 +373,9 @@ void SystemClock_Config(void)
   */
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
 
-  while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
+  while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY))
+  {
+  }
   /** Configure LSE Drive Capability
   */
   HAL_PWR_EnableBkUpAccess();
@@ -327,9 +386,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI | RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_LSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.LSEState = RCC_LSE_ON;
+  RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 2;
@@ -346,9 +407,7 @@ void SystemClock_Config(void)
   }
   /** Initializes the CPU, AHB and APB buses clocks
   */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
-                              |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 | RCC_CLOCKTYPE_D3PCLK1 | RCC_CLOCKTYPE_D1PCLK1;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
@@ -361,39 +420,24 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_RTC|RCC_PERIPHCLK_USART6
-                              |RCC_PERIPHCLK_SPI3|RCC_PERIPHCLK_SPI2
-                              |RCC_PERIPHCLK_ADC|RCC_PERIPHCLK_USB
-                              |RCC_PERIPHCLK_FMC;
-  PeriphClkInitStruct.PLL2.PLL2M = 8;
-  PeriphClkInitStruct.PLL2.PLL2N = 336;
-  PeriphClkInitStruct.PLL2.PLL2P = 2;
-  PeriphClkInitStruct.PLL2.PLL2Q = 2;
-  PeriphClkInitStruct.PLL2.PLL2R = 2;
-  PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_0;
-  PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
-  PeriphClkInitStruct.PLL2.PLL2FRACN = 0;
-  PeriphClkInitStruct.PLL3.PLL3M = 4;
-  PeriphClkInitStruct.PLL3.PLL3N = 96;
-  PeriphClkInitStruct.PLL3.PLL3P = 2;
-  PeriphClkInitStruct.PLL3.PLL3Q = 4;
-  PeriphClkInitStruct.PLL3.PLL3R = 2;
-  PeriphClkInitStruct.PLL3.PLL3RGE = RCC_PLL3VCIRANGE_1;
-  PeriphClkInitStruct.PLL3.PLL3VCOSEL = RCC_PLL3VCOWIDE;
-  PeriphClkInitStruct.PLL3.PLL3FRACN = 0;
-  PeriphClkInitStruct.FmcClockSelection = RCC_FMCCLKSOURCE_D1HCLK;
-  PeriphClkInitStruct.Spi123ClockSelection = RCC_SPI123CLKSOURCE_PIN;
-  PeriphClkInitStruct.Usart16ClockSelection = RCC_USART16CLKSOURCE_D2PCLK2;
-  PeriphClkInitStruct.UsbClockSelection = RCC_USBCLKSOURCE_PLL3;
-  PeriphClkInitStruct.AdcClockSelection = RCC_ADCCLKSOURCE_PLL2;
-  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
+}
+
+/**
+  * @brief Peripherals Common Clock Configuration
+  * @retval None
+  */
+void PeriphCommonClock_Config(void)
+{
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  /** Initializes the peripherals clock
+  */
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_CKPER;
+  PeriphClkInitStruct.CkperClockSelection = RCC_CLKPSOURCE_HSI;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
-  /** Enable USB Voltage detector
-  */
-  HAL_PWREx_EnableUSBVoltageDetector();
 }
 
 /**
@@ -491,7 +535,6 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
-
 }
 
 /**
@@ -563,7 +606,6 @@ static void MX_ADC3_Init(void)
   /* USER CODE BEGIN ADC3_Init 2 */
 
   /* USER CODE END ADC3_Init 2 */
-
 }
 
 /**
@@ -585,8 +627,6 @@ static void MX_DMA2D_Init(void)
   hdma2d.Init.Mode = DMA2D_M2M;
   hdma2d.Init.ColorMode = DMA2D_OUTPUT_RGB565;
   hdma2d.Init.OutputOffset = 0;
-  hdma2d.Init.BytesSwap = DMA2D_BYTES_REGULAR;
-  hdma2d.Init.LineOffsetMode = DMA2D_LOM_PIXELS;
   hdma2d.LayerCfg[1].InputOffset = 0;
   hdma2d.LayerCfg[1].InputColorMode = DMA2D_INPUT_RGB565;
   hdma2d.LayerCfg[1].AlphaMode = DMA2D_NO_MODIF_ALPHA;
@@ -605,7 +645,6 @@ static void MX_DMA2D_Init(void)
   /* USER CODE BEGIN DMA2D_Init 2 */
 
   /* USER CODE END DMA2D_Init 2 */
-
 }
 
 /**
@@ -646,7 +685,6 @@ static void MX_I2S3_Init(void)
     Error_Handler();
   }
   /* USER CODE END I2S3_Init 2 */
-
 }
 
 /**
@@ -681,7 +719,6 @@ static void MX_RTC_Init(void)
   /* USER CODE BEGIN RTC_Init 2 */
 
   /* USER CODE END RTC_Init 2 */
-
 }
 
 /**
@@ -729,7 +766,6 @@ static void MX_SPI2_Init(void)
   /* USER CODE BEGIN SPI2_Init 2 */
 
   /* USER CODE END SPI2_Init 2 */
-
 }
 
 /**
@@ -774,7 +810,6 @@ static void MX_TIM2_Init(void)
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
-
 }
 
 /**
@@ -819,7 +854,6 @@ static void MX_TIM3_Init(void)
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
-
 }
 
 /**
@@ -841,7 +875,7 @@ static void MX_TIM4_Init(void)
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 11999;
+  htim4.Init.Prescaler = 1199;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 199;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -864,7 +898,6 @@ static void MX_TIM4_Init(void)
   /* USER CODE BEGIN TIM4_Init 2 */
 
   /* USER CODE END TIM4_Init 2 */
-
 }
 
 /**
@@ -909,7 +942,6 @@ static void MX_TIM5_Init(void)
   /* USER CODE BEGIN TIM5_Init 2 */
 
   /* USER CODE END TIM5_Init 2 */
-
 }
 
 /**
@@ -947,7 +979,6 @@ static void MX_TIM6_Init(void)
   /* USER CODE BEGIN TIM6_Init 2 */
 
   /* USER CODE END TIM6_Init 2 */
-
 }
 
 /**
@@ -985,7 +1016,6 @@ static void MX_TIM7_Init(void)
   /* USER CODE BEGIN TIM7_Init 2 */
 
   /* USER CODE END TIM7_Init 2 */
-
 }
 
 /**
@@ -1007,9 +1037,9 @@ static void MX_TIM15_Init(void)
 
   /* USER CODE END TIM15_Init 1 */
   htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 599;
+  htim15.Init.Prescaler = 1199;
   htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim15.Init.Period = 19999;
+  htim15.Init.Period = 199;
   htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim15.Init.RepetitionCounter = 0;
   htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -1031,7 +1061,6 @@ static void MX_TIM15_Init(void)
   /* USER CODE BEGIN TIM15_Init 2 */
 
   /* USER CODE END TIM15_Init 2 */
-
 }
 
 /**
@@ -1063,7 +1092,6 @@ static void MX_TIM16_Init(void)
   /* USER CODE BEGIN TIM16_Init 2 */
 
   /* USER CODE END TIM16_Init 2 */
-
 }
 
 /**
@@ -1082,9 +1110,9 @@ static void MX_TIM17_Init(void)
 
   /* USER CODE END TIM17_Init 1 */
   htim17.Instance = TIM17;
-  htim17.Init.Prescaler = 1199;
+  htim17.Init.Prescaler = 119;
   htim17.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim17.Init.Period = 199;
+  htim17.Init.Period = 99;
   htim17.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim17.Init.RepetitionCounter = 0;
   htim17.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -1095,7 +1123,6 @@ static void MX_TIM17_Init(void)
   /* USER CODE BEGIN TIM17_Init 2 */
 
   /* USER CODE END TIM17_Init 2 */
-
 }
 
 /**
@@ -1143,7 +1170,6 @@ static void MX_USART6_UART_Init(void)
   /* USER CODE BEGIN USART6_Init 2 */
 
   /* USER CODE END USART6_Init 2 */
-
 }
 
 /**
@@ -1169,8 +1195,8 @@ static void MX_USB_OTG_FS_PCD_Init(void)
   hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
   hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
   hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.battery_charging_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = DISABLE;
+  hpcd_USB_OTG_FS.Init.battery_charging_enable = ENABLE;
+  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
   hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
   if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
   {
@@ -1179,15 +1205,11 @@ static void MX_USB_OTG_FS_PCD_Init(void)
   /* USER CODE BEGIN USB_OTG_FS_Init 2 */
 
   /* USER CODE END USB_OTG_FS_Init 2 */
-
 }
 
 /**
   * Enable DMA controller clock
   * Configure DMA for memory to memory transfers
-  *   hdma_memtomem_dma2_stream7
-  *   hdma_memtomem_dma2_stream6
-  *   hdma_memtomem_dma2_stream4
   *   hdma_memtomem_dma2_stream5
   */
 static void MX_DMA_Init(void)
@@ -1196,63 +1218,6 @@ static void MX_DMA_Init(void)
   /* DMA controller clock enable */
   __HAL_RCC_DMA1_CLK_ENABLE();
   __HAL_RCC_DMA2_CLK_ENABLE();
-
-  /* Configure DMA request hdma_memtomem_dma2_stream7 on DMA2_Stream7 */
-  hdma_memtomem_dma2_stream7.Instance = DMA2_Stream7;
-  hdma_memtomem_dma2_stream7.Init.Request = DMA_REQUEST_MEM2MEM;
-  hdma_memtomem_dma2_stream7.Init.Direction = DMA_MEMORY_TO_MEMORY;
-  hdma_memtomem_dma2_stream7.Init.PeriphInc = DMA_PINC_ENABLE;
-  hdma_memtomem_dma2_stream7.Init.MemInc = DMA_MINC_ENABLE;
-  hdma_memtomem_dma2_stream7.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-  hdma_memtomem_dma2_stream7.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
-  hdma_memtomem_dma2_stream7.Init.Mode = DMA_NORMAL;
-  hdma_memtomem_dma2_stream7.Init.Priority = DMA_PRIORITY_LOW;
-  hdma_memtomem_dma2_stream7.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
-  hdma_memtomem_dma2_stream7.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
-  hdma_memtomem_dma2_stream7.Init.MemBurst = DMA_MBURST_INC4;
-  hdma_memtomem_dma2_stream7.Init.PeriphBurst = DMA_PBURST_INC4;
-  if (HAL_DMA_Init(&hdma_memtomem_dma2_stream7) != HAL_OK)
-  {
-    Error_Handler( );
-  }
-
-  /* Configure DMA request hdma_memtomem_dma2_stream6 on DMA2_Stream6 */
-  hdma_memtomem_dma2_stream6.Instance = DMA2_Stream6;
-  hdma_memtomem_dma2_stream6.Init.Request = DMA_REQUEST_MEM2MEM;
-  hdma_memtomem_dma2_stream6.Init.Direction = DMA_MEMORY_TO_MEMORY;
-  hdma_memtomem_dma2_stream6.Init.PeriphInc = DMA_PINC_ENABLE;
-  hdma_memtomem_dma2_stream6.Init.MemInc = DMA_MINC_DISABLE;
-  hdma_memtomem_dma2_stream6.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-  hdma_memtomem_dma2_stream6.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-  hdma_memtomem_dma2_stream6.Init.Mode = DMA_NORMAL;
-  hdma_memtomem_dma2_stream6.Init.Priority = DMA_PRIORITY_LOW;
-  hdma_memtomem_dma2_stream6.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
-  hdma_memtomem_dma2_stream6.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
-  hdma_memtomem_dma2_stream6.Init.MemBurst = DMA_MBURST_INC8;
-  hdma_memtomem_dma2_stream6.Init.PeriphBurst = DMA_PBURST_INC8;
-  if (HAL_DMA_Init(&hdma_memtomem_dma2_stream6) != HAL_OK)
-  {
-    Error_Handler( );
-  }
-
-  /* Configure DMA request hdma_memtomem_dma2_stream4 on DMA2_Stream4 */
-  hdma_memtomem_dma2_stream4.Instance = DMA2_Stream4;
-  hdma_memtomem_dma2_stream4.Init.Request = DMA_REQUEST_MEM2MEM;
-  hdma_memtomem_dma2_stream4.Init.Direction = DMA_MEMORY_TO_MEMORY;
-  hdma_memtomem_dma2_stream4.Init.PeriphInc = DMA_PINC_ENABLE;
-  hdma_memtomem_dma2_stream4.Init.MemInc = DMA_MINC_ENABLE;
-  hdma_memtomem_dma2_stream4.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-  hdma_memtomem_dma2_stream4.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-  hdma_memtomem_dma2_stream4.Init.Mode = DMA_NORMAL;
-  hdma_memtomem_dma2_stream4.Init.Priority = DMA_PRIORITY_LOW;
-  hdma_memtomem_dma2_stream4.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
-  hdma_memtomem_dma2_stream4.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
-  hdma_memtomem_dma2_stream4.Init.MemBurst = DMA_MBURST_INC8;
-  hdma_memtomem_dma2_stream4.Init.PeriphBurst = DMA_PBURST_INC8;
-  if (HAL_DMA_Init(&hdma_memtomem_dma2_stream4) != HAL_OK)
-  {
-    Error_Handler( );
-  }
 
   /* Configure DMA request hdma_memtomem_dma2_stream5 on DMA2_Stream5 */
   hdma_memtomem_dma2_stream5.Instance = DMA2_Stream5;
@@ -1263,30 +1228,32 @@ static void MX_DMA_Init(void)
   hdma_memtomem_dma2_stream5.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
   hdma_memtomem_dma2_stream5.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
   hdma_memtomem_dma2_stream5.Init.Mode = DMA_NORMAL;
-  hdma_memtomem_dma2_stream5.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma2_stream5.Init.Priority = DMA_PRIORITY_MEDIUM;
   hdma_memtomem_dma2_stream5.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
   hdma_memtomem_dma2_stream5.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
   hdma_memtomem_dma2_stream5.Init.MemBurst = DMA_MBURST_INC8;
   hdma_memtomem_dma2_stream5.Init.PeriphBurst = DMA_PBURST_INC8;
   if (HAL_DMA_Init(&hdma_memtomem_dma2_stream5) != HAL_OK)
   {
-    Error_Handler( );
+    Error_Handler();
   }
 
   /* DMA interrupt init */
   /* DMA1_Stream1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+  /* DMA1_Stream2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
   /* DMA1_Stream5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
   /* DMA2_Stream5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream5_IRQn, 7, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream5_IRQn);
-  /* DMA2_Stream6_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 7, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
-
 }
 
 /**
@@ -1295,6 +1262,8 @@ static void MX_DMA_Init(void)
   *   hmdma_mdma_channel40_sw_0
   *   hmdma_mdma_channel41_sw_0
   *   hmdma_mdma_channel42_sw_0
+  *   hmdma_mdma_channel43_sw_0
+  *   hmdma_mdma_channel44_sw_0
   */
 static void MX_MDMA_Init(void)
 {
@@ -1369,6 +1338,49 @@ static void MX_MDMA_Init(void)
     Error_Handler();
   }
 
+  /* Configure MDMA channel MDMA_Channel3 */
+  /* Configure MDMA request hmdma_mdma_channel43_sw_0 on MDMA_Channel3 */
+  hmdma_mdma_channel43_sw_0.Instance = MDMA_Channel3;
+  hmdma_mdma_channel43_sw_0.Init.Request = MDMA_REQUEST_SW;
+  hmdma_mdma_channel43_sw_0.Init.TransferTriggerMode = MDMA_FULL_TRANSFER;
+  hmdma_mdma_channel43_sw_0.Init.Priority = MDMA_PRIORITY_LOW;
+  hmdma_mdma_channel43_sw_0.Init.Endianness = MDMA_LITTLE_ENDIANNESS_PRESERVE;
+  hmdma_mdma_channel43_sw_0.Init.SourceInc = MDMA_SRC_DEC_WORD;
+  hmdma_mdma_channel43_sw_0.Init.DestinationInc = MDMA_DEST_DEC_WORD;
+  hmdma_mdma_channel43_sw_0.Init.SourceDataSize = MDMA_SRC_DATASIZE_WORD;
+  hmdma_mdma_channel43_sw_0.Init.DestDataSize = MDMA_DEST_DATASIZE_WORD;
+  hmdma_mdma_channel43_sw_0.Init.DataAlignment = MDMA_DATAALIGN_PACKENABLE;
+  hmdma_mdma_channel43_sw_0.Init.BufferTransferLength = 32;
+  hmdma_mdma_channel43_sw_0.Init.SourceBurst = MDMA_SOURCE_BURST_SINGLE;
+  hmdma_mdma_channel43_sw_0.Init.DestBurst = MDMA_DEST_BURST_SINGLE;
+  hmdma_mdma_channel43_sw_0.Init.SourceBlockAddressOffset = 0;
+  hmdma_mdma_channel43_sw_0.Init.DestBlockAddressOffset = 0;
+  if (HAL_MDMA_Init(&hmdma_mdma_channel43_sw_0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* Configure MDMA channel MDMA_Channel4 */
+  /* Configure MDMA request hmdma_mdma_channel44_sw_0 on MDMA_Channel4 */
+  hmdma_mdma_channel44_sw_0.Instance = MDMA_Channel4;
+  hmdma_mdma_channel44_sw_0.Init.Request = MDMA_REQUEST_SW;
+  hmdma_mdma_channel44_sw_0.Init.TransferTriggerMode = MDMA_FULL_TRANSFER;
+  hmdma_mdma_channel44_sw_0.Init.Priority = MDMA_PRIORITY_MEDIUM;
+  hmdma_mdma_channel44_sw_0.Init.Endianness = MDMA_LITTLE_ENDIANNESS_PRESERVE;
+  hmdma_mdma_channel44_sw_0.Init.SourceInc = MDMA_SRC_INC_DISABLE;
+  hmdma_mdma_channel44_sw_0.Init.DestinationInc = MDMA_DEST_INC_WORD;
+  hmdma_mdma_channel44_sw_0.Init.SourceDataSize = MDMA_SRC_DATASIZE_WORD;
+  hmdma_mdma_channel44_sw_0.Init.DestDataSize = MDMA_DEST_DATASIZE_WORD;
+  hmdma_mdma_channel44_sw_0.Init.DataAlignment = MDMA_DATAALIGN_PACKENABLE;
+  hmdma_mdma_channel44_sw_0.Init.BufferTransferLength = 32;
+  hmdma_mdma_channel44_sw_0.Init.SourceBurst = MDMA_SOURCE_BURST_SINGLE;
+  hmdma_mdma_channel44_sw_0.Init.DestBurst = MDMA_DEST_BURST_SINGLE;
+  hmdma_mdma_channel44_sw_0.Init.SourceBlockAddressOffset = 0;
+  hmdma_mdma_channel44_sw_0.Init.DestBlockAddressOffset = 0;
+  if (HAL_MDMA_Init(&hmdma_mdma_channel44_sw_0) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /* FMC initialization function */
@@ -1417,61 +1429,73 @@ static void MX_FMC_Init(void)
 
   if (HAL_SRAM_Init(&hsram1, &Timing, NULL) != HAL_OK)
   {
-    Error_Handler( );
+    Error_Handler();
   }
 
   HAL_SetFMCMemorySwappingConfig(FMC_SWAPBMAP_SDRAM_SRAM);
 
   /* USER CODE BEGIN FMC_Init 2 */
 
-	//LCD timings
+  //LCD timings
 #if (defined(LCD_HX8357B))
-	Timing.AddressSetupTime = 5;
+  Timing.AddressSetupTime = 5;
   Timing.DataSetupTime = 5;
   Timing.BusTurnAroundDuration = 3;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
 #endif
 #if (defined(LCD_HX8357C))
-	Timing.AddressSetupTime = 8;
-  Timing.DataSetupTime = 8;
-  Timing.BusTurnAroundDuration = 6;
+  Timing.AddressSetupTime = 10;
+  Timing.DataSetupTime = 10;
+  Timing.BusTurnAroundDuration = 8;
+  Timing.AccessMode = FMC_ACCESS_MODE_A;
+#if (defined(LCD_SLOW))
+  Timing.AddressSetupTime = 20;
+  Timing.DataSetupTime = 20;
+  Timing.BusTurnAroundDuration = 16;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
 #endif
+#endif
 #if (defined(LCD_SSD1963))
-	Timing.AddressSetupTime = 5;
+  Timing.AddressSetupTime = 5;
   Timing.DataSetupTime = 5;
   Timing.BusTurnAroundDuration = 3;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
 #endif
 #if (defined(LCD_ILI9486))
-	Timing.AddressSetupTime = 5;
+  Timing.AddressSetupTime = 5;
   Timing.DataSetupTime = 5;
   Timing.BusTurnAroundDuration = 3;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
 #endif
 #if (defined(LCD_R61581))
-	Timing.AddressSetupTime = 5;
+  Timing.AddressSetupTime = 5;
   Timing.DataSetupTime = 5;
   Timing.BusTurnAroundDuration = 3;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
 #endif
-#if defined(LCD_ILI9481)	
-	Timing.AddressSetupTime = 5;
+#if defined(LCD_ILI9481)
+  Timing.AddressSetupTime = 5;
+  Timing.DataSetupTime = 5;
+  Timing.BusTurnAroundDuration = 3;
+  Timing.AccessMode = FMC_ACCESS_MODE_A;
+#endif
+#if defined(LCD_ST7796S)
+  Timing.AddressSetupTime = 5;
   Timing.DataSetupTime = 5;
   Timing.BusTurnAroundDuration = 3;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
 #endif
 #if (defined(LCD_RA8875))
-	Timing.AddressSetupTime = 19;
-  Timing.DataSetupTime = 19;
-  Timing.BusTurnAroundDuration = 0;
+  Timing.AddressSetupTime = 20;
+  Timing.DataSetupTime = 20;
+  Timing.BusTurnAroundDuration = 10;
   Timing.AccessMode = FMC_ACCESS_MODE_A;
-	hsram1.Init.WriteFifo = FMC_WRITE_FIFO_ENABLE;
+  //fast timings in lcd_driver_RA8875.c
 #endif
-	if (HAL_SRAM_Init(&hsram1, &Timing, NULL) != HAL_OK)
-		Error_Handler();
+  if (HAL_SRAM_Init(&hsram1, &Timing, NULL) != HAL_OK)
+    Error_Handler();
   HAL_SetFMCMemorySwappingConfig(FMC_SWAPBMAP_SDRAM_SRAM);
-	
+
   /* USER CODE END FMC_Init 2 */
 }
 
@@ -1493,14 +1517,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, FPGA_CLK_Pin|FPGA_SYNC_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, FPGA_CLK_Pin | FPGA_SYNC_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, FPGA_BUS_D0_Pin|FPGA_BUS_D1_Pin|FPGA_BUS_D2_Pin|FPGA_BUS_D3_Pin
-                          |FPGA_BUS_D4_Pin|FPGA_BUS_D5_Pin|FPGA_BUS_D6_Pin|FPGA_BUS_D7_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, FPGA_BUS_D0_Pin | FPGA_BUS_D1_Pin | FPGA_BUS_D2_Pin | FPGA_BUS_D3_Pin | FPGA_BUS_D4_Pin | FPGA_BUS_D5_Pin | FPGA_BUS_D6_Pin | FPGA_BUS_D7_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, W25Q16_CS_Pin|SD_CS_Pin|AD3_CS_Pin|RFUNIT_OE_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, W25Q16_CS_Pin | SD_CS_Pin | AD3_CS_Pin | AF_AMP_MUTE_Pin | RFUNIT_OE_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(PWR_HOLD_GPIO_Port, PWR_HOLD_Pin, GPIO_PIN_SET);
@@ -1512,13 +1535,13 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(AD2_CS_GPIO_Port, AD2_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, WM8731_SCK_Pin|WM8731_SDA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, WM8731_SCK_Pin | WM8731_SDA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RFUNIT_RCLK_Pin|RFUNIT_CLK_Pin|RFUNIT_DATA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, RFUNIT_RCLK_Pin | RFUNIT_CLK_Pin | RFUNIT_DATA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : ENC_CLK_Pin KEY_IN_DASH_Pin KEY_IN_DOT_Pin */
-  GPIO_InitStruct.Pin = ENC_CLK_Pin|KEY_IN_DASH_Pin|KEY_IN_DOT_Pin;
+  GPIO_InitStruct.Pin = ENC_CLK_Pin | KEY_IN_DASH_Pin | KEY_IN_DOT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
@@ -1530,7 +1553,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /*Configure GPIO pins : ENC2SW_AND_TOUCHPAD_Pin ENC_DT_Pin ENC2_DT_Pin */
-  GPIO_InitStruct.Pin = ENC2SW_AND_TOUCHPAD_Pin|ENC_DT_Pin|ENC2_DT_Pin;
+  GPIO_InitStruct.Pin = ENC2SW_AND_TOUCHPAD_Pin | ENC_DT_Pin | ENC2_DT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
@@ -1548,7 +1571,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SWR_BACKW_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : FPGA_CLK_Pin FPGA_SYNC_Pin AD1_CS_Pin */
-  GPIO_InitStruct.Pin = FPGA_CLK_Pin|FPGA_SYNC_Pin|AD1_CS_Pin;
+  GPIO_InitStruct.Pin = FPGA_CLK_Pin | FPGA_SYNC_Pin | AD1_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1557,9 +1580,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pins : FPGA_BUS_D0_Pin FPGA_BUS_D1_Pin FPGA_BUS_D2_Pin FPGA_BUS_D3_Pin
                            FPGA_BUS_D4_Pin FPGA_BUS_D5_Pin FPGA_BUS_D6_Pin FPGA_BUS_D7_Pin
                            AD2_CS_Pin */
-  GPIO_InitStruct.Pin = FPGA_BUS_D0_Pin|FPGA_BUS_D1_Pin|FPGA_BUS_D2_Pin|FPGA_BUS_D3_Pin
-                          |FPGA_BUS_D4_Pin|FPGA_BUS_D5_Pin|FPGA_BUS_D6_Pin|FPGA_BUS_D7_Pin
-                          |AD2_CS_Pin;
+  GPIO_InitStruct.Pin = FPGA_BUS_D0_Pin | FPGA_BUS_D1_Pin | FPGA_BUS_D2_Pin | FPGA_BUS_D3_Pin | FPGA_BUS_D4_Pin | FPGA_BUS_D5_Pin | FPGA_BUS_D6_Pin | FPGA_BUS_D7_Pin | AD2_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1571,17 +1592,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(PTT_IN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : W25Q16_CS_Pin SD_CS_Pin AD3_CS_Pin RFUNIT_RCLK_Pin
-                           RFUNIT_CLK_Pin RFUNIT_DATA_Pin RFUNIT_OE_Pin */
-  GPIO_InitStruct.Pin = W25Q16_CS_Pin|SD_CS_Pin|AD3_CS_Pin|RFUNIT_RCLK_Pin
-                          |RFUNIT_CLK_Pin|RFUNIT_DATA_Pin|RFUNIT_OE_Pin;
+  /*Configure GPIO pins : W25Q16_CS_Pin SD_CS_Pin AD3_CS_Pin AF_AMP_MUTE_Pin
+                           RFUNIT_RCLK_Pin RFUNIT_CLK_Pin RFUNIT_DATA_Pin RFUNIT_OE_Pin */
+  GPIO_InitStruct.Pin = W25Q16_CS_Pin | SD_CS_Pin | AD3_CS_Pin | AF_AMP_MUTE_Pin | RFUNIT_RCLK_Pin | RFUNIT_CLK_Pin | RFUNIT_DATA_Pin | RFUNIT_OE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB2 PB4 PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_4|GPIO_PIN_5;
+  /*Configure GPIO pins : PB2 PB4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -1599,7 +1619,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(PWR_ON_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PWR_HOLD_Pin WM8731_SCK_Pin WM8731_SDA_Pin */
-  GPIO_InitStruct.Pin = PWR_HOLD_Pin|WM8731_SCK_Pin|WM8731_SDA_Pin;
+  GPIO_InitStruct.Pin = PWR_HOLD_Pin | WM8731_SCK_Pin | WM8731_SDA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1612,12 +1632,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
   HAL_GPIO_Init(AUDIO_I2S_CLOCK_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PA9 PA10 */
-  GPIO_InitStruct.Pin = GPIO_PIN_9|GPIO_PIN_10;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PD2 */
   GPIO_InitStruct.Pin = GPIO_PIN_2;
@@ -1640,17 +1654,34 @@ static void MX_GPIO_Init(void)
 
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
 }
 
 /* USER CODE BEGIN 4 */
-//обработка SWD отладки
+//обработка вывода отладки
 FILE __stdout;
 FILE __stdin;
 
 int fputc(int ch, FILE *f)
 {
-  ITM_SendChar((uint32_t)ch);
+#pragma unused(f)
+
+  //SWD
+  if (SWD_DEBUG_ENABLED)
+    ITM_SendChar((uint32_t)ch);
+
+  //USB
+  if (USB_DEBUG_ENABLED)
+  {
+    char usb_char = (char)ch;
+    DEBUG_Transmit_FIFO((uint8_t *)&usb_char, 1);
+  }
+
+  //LCD
+  if (LCD_DEBUG_ENABLED)
+  {
+    print_chr_LCDOnly((char)ch);
+  }
+
   return (ch);
 }
 /* USER CODE END 4 */
@@ -1680,52 +1711,13 @@ void MPU_Config(void)
   HAL_MPU_ConfigRegion(&MPU_InitStruct);
   /** Initializes and configures the Region and the memory to be protected
   */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER1;
-  MPU_InitStruct.BaseAddress = 0x30000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_256KB;
-  MPU_InitStruct.SubRegionDisable = 0x0;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
   MPU_InitStruct.Number = MPU_REGION_NUMBER2;
   MPU_InitStruct.BaseAddress = 0x38800000;
   MPU_InitStruct.Size = MPU_REGION_SIZE_4KB;
-  MPU_InitStruct.SubRegionDisable = 0x0;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER3;
-  MPU_InitStruct.BaseAddress = 0x30040000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_32KB;
-  MPU_InitStruct.SubRegionDisable = 0x0;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
 
   HAL_MPU_ConfigRegion(&MPU_InitStruct);
   /* Enables the MPU */
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-
 }
 
 /**
@@ -1736,7 +1728,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-	sendToDebug_strln("error handled");
+  println("error handled");
   /*while (1)
 	{
 		LCD_showError("Error handled", true);
@@ -1745,7 +1737,7 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

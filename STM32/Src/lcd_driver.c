@@ -16,8 +16,13 @@ uint16_t LCDDriver_GetCurrentXOffset(void)
 	return text_cursor_x;
 }
 
+void LCDDriver_SetCurrentXOffset(uint16_t x)
+{
+	text_cursor_x = x;
+}
+
 //Text printing functions
-ITCM void LCDDriver_drawChar(uint16_t x, uint16_t y, unsigned char c, uint16_t color, uint16_t bg, uint8_t size)
+void LCDDriver_drawChar(uint16_t x, uint16_t y, unsigned char c, uint16_t color, uint16_t bg, uint8_t size)
 {
 	uint8_t line = 0;
 	if ((x >= LCD_WIDTH) ||			// Clip right
@@ -26,12 +31,16 @@ ITCM void LCDDriver_drawChar(uint16_t x, uint16_t y, unsigned char c, uint16_t c
 		((y + 8 * size - 1) < 0))	// Clip top
 		return;
 
+	if (c < 32) //non-printable
+		return;
 	if (!_cp437 && (c >= 176))
-		c++;																   // Handle 'classic' charset behavior
+		c++; // Handle 'classic' charset behavior
+
 	LCDDriver_SetCursorAreaPosition(x, y, x + 6 * size - 1, y + 8 * size - 1); //char area
-	for (int8_t j = 0; j < 8; j++)
-	{											//y line out
+	for (int8_t j = 0; j < 8; j++)											   //y line out
+	{
 		for (int8_t s_y = 0; s_y < size; s_y++) //y size scale
+		{
 			for (int8_t i = 0; i < 6; i++)
 			{ //x line out
 				{
@@ -49,16 +58,18 @@ ITCM void LCDDriver_drawChar(uint16_t x, uint16_t y, unsigned char c, uint16_t c
 					}
 				}
 			}
+		}
 	}
 }
 
-ITCM void LCDDriver_printText(char text[], uint16_t x, uint16_t y, uint16_t color, uint16_t bg, uint8_t size)
+void LCDDriver_printText(char text[], uint16_t x, uint16_t y, uint16_t color, uint16_t bg, uint8_t size)
 {
+	uint16_t i = 0;
 	uint16_t offset = size * 6;
 	uint16_t skipped = 0;
-	for (uint16_t i = 0; i < 40 && text[i] != 0; i++)
+	for (i = 0; i < 128 && text[i] != 0; i++)
 	{
-		if(text[i] == '^' && text[i+1] == 'o') //celsius
+		if (text[i] == '^' && text[i + 1] == 'o') //celsius
 		{
 			i++;
 			skipped++;
@@ -73,7 +84,7 @@ ITCM void LCDDriver_printText(char text[], uint16_t x, uint16_t y, uint16_t colo
 	}
 }
 
-ITCM void LCDDriver_drawCharFont(uint16_t x, uint16_t y, unsigned char c, uint16_t color, uint16_t bg, const GFXfont *gfxFont)
+void LCDDriver_drawCharFont(uint16_t x, uint16_t y, unsigned char c, uint16_t color, uint16_t bg, const GFXfont *gfxFont)
 {
 	c -= gfxFont->first;
 	GFXglyph *glyph = (GFXglyph *)&gfxFont->glyph[c];
@@ -88,7 +99,7 @@ ITCM void LCDDriver_drawCharFont(uint16_t x, uint16_t y, unsigned char c, uint16
 	if (ys2 < 0)
 		ys2 = 0;
 	LCDDriver_SetCursorAreaPosition(x, (uint16_t)ys1, x + glyph->xAdvance - 1, (uint16_t)ys2); //char area
-	
+
 	for (uint8_t yy = 0; yy < glyph->height; yy++)
 	{
 		for (uint8_t xx = 0; xx < glyph->xAdvance; xx++)
@@ -115,7 +126,7 @@ ITCM void LCDDriver_drawCharFont(uint16_t x, uint16_t y, unsigned char c, uint16
 	}
 }
 
-ITCM void LCDDriver_printTextFont(char text[], uint16_t x, uint16_t y, uint16_t color, uint16_t bg, const GFXfont *gfxFont)
+void LCDDriver_printTextFont(char text[], uint16_t x, uint16_t y, uint16_t color, uint16_t bg, const GFXfont *gfxFont)
 {
 	uint8_t c = 0;
 	text_cursor_x = x;
@@ -161,7 +172,7 @@ ITCM void LCDDriver_printTextFont(char text[], uint16_t x, uint16_t y, uint16_t 
 	@param    maxy  Maximum clipping value for Y
 */
 /**************************************************************************/
-ITCM static void LCDDriver_charBounds(char c, uint16_t *x, uint16_t *y, int16_t *minx, int16_t *miny, int16_t *maxx, int16_t *maxy, const GFXfont *gfxFont)
+static void LCDDriver_charBounds(char c, uint16_t *x, uint16_t *y, int16_t *minx, int16_t *miny, int16_t *maxx, int16_t *maxy, const GFXfont *gfxFont)
 {
 	if (c == '\n')
 	{			// Newline?
@@ -169,7 +180,7 @@ ITCM static void LCDDriver_charBounds(char c, uint16_t *x, uint16_t *y, int16_t 
 		*y += gfxFont->yAdvance;
 	}
 	else if (c != '\r')
-	{ 
+	{
 		if ((c >= gfxFont->first) && (c <= gfxFont->last))
 		{ // Char present in this font?
 			GFXglyph *glyph = (GFXglyph *)&gfxFont->glyph[c - gfxFont->first];
@@ -207,7 +218,7 @@ ITCM static void LCDDriver_charBounds(char c, uint16_t *x, uint16_t *y, int16_t 
 	@param    h      The boundary height, set by function
 */
 /**************************************************************************/
-ITCM void LCDDriver_getTextBounds(char text[], uint16_t x, uint16_t y, uint16_t *x1, uint16_t *y1, uint16_t *w, uint16_t *h, const GFXfont *gfxFont)
+void LCDDriver_getTextBounds(char text[], uint16_t x, uint16_t y, uint16_t *x1, uint16_t *y1, uint16_t *w, uint16_t *h, const GFXfont *gfxFont)
 {
 	uint8_t c; // Current character
 
@@ -236,7 +247,7 @@ ITCM void LCDDriver_getTextBounds(char text[], uint16_t x, uint16_t y, uint16_t 
 }
 
 //Image print (RGB 565, 2 bytes per pixel)
-ITCM void LCDDriver_printImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t *data)
+void LCDDriver_printImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t *data)
 {
 	uint32_t n = w * h * 2;
 	LCDDriver_SetCursorAreaPosition(x, y, w + x - 1, h + y - 1);
@@ -246,7 +257,7 @@ ITCM void LCDDriver_printImage(uint16_t x, uint16_t y, uint16_t w, uint16_t h, u
 	}
 }
 
-ITCM void LCDDriver_printImage_RLECompressed(uint16_t x, uint16_t y, const tIMAGE *image, uint16_t transparent_color, uint16_t bg_color)
+void LCDDriver_printImage_RLECompressed(uint16_t x, uint16_t y, const tIMAGE *image, uint16_t transparent_color, uint16_t bg_color)
 {
 	uint32_t pixels = image->width * image->height;
 	uint32_t i = 0;
@@ -261,7 +272,7 @@ ITCM void LCDDriver_printImage_RLECompressed(uint16_t x, uint16_t y, const tIMAG
 			i++;
 			for (uint16_t p = 0; p < count; p++)
 			{
-				if(image->data[i] == transparent_color)
+				if (image->data[i] == transparent_color)
 					LCDDriver_SendData(bg_color);
 				else
 					LCDDriver_SendData(image->data[i]);
@@ -277,7 +288,7 @@ ITCM void LCDDriver_printImage_RLECompressed(uint16_t x, uint16_t y, const tIMAG
 			i++;
 			for (uint16_t p = 0; p < count; p++)
 			{
-				if(image->data[i] == transparent_color)
+				if (image->data[i] == transparent_color)
 					LCDDriver_SendData(bg_color);
 				else
 					LCDDriver_SendData(image->data[i]);
@@ -298,7 +309,7 @@ void LCDDriver_printImage_RLECompressed_StartStream(uint16_t x, uint16_t y, uint
 	RLEStream_pixels = width * height;
 	RLEStream_decoded = 0;
 	RLEStream_state = 0;
-	
+
 	LCDDriver_SetCursorAreaPosition(x, y, width + x - 1, height + y - 1);
 }
 
@@ -313,17 +324,17 @@ void LCDDriver_printImage_RLECompressed_ContinueStream(int16_t *data, uint16_t l
 	{
 		if ((((int16_t)data[processed] < 0) && (RLEStream_state == 0)) || (RLEStream_state == 1)) // no repeats
 		{
-			if(RLEStream_state == 0)
+			if (RLEStream_state == 0)
 			{
 				nr_count = (-(int16_t)data[processed]);
 				nr_count_p = 0;
 				processed++;
 			}
 			RLEStream_state = 1;
-			
-			if(processed >= len)
+
+			if (processed >= len)
 				return;
-			
+
 			for (; nr_count_p < nr_count;)
 			{
 				LCDDriver_SendData(data[processed]);
@@ -332,24 +343,24 @@ void LCDDriver_printImage_RLECompressed_ContinueStream(int16_t *data, uint16_t l
 				processed++;
 				if (RLEStream_pixels <= RLEStream_decoded)
 					return;
-				if(processed >= len && nr_count_p < nr_count)
+				if (processed >= len && nr_count_p < nr_count)
 					return;
 			}
 			RLEStream_state = 0;
 		}
 		else if ((((int16_t)data[processed] > 0) && (RLEStream_state == 0)) || (RLEStream_state == 2)) //repeats
 		{
-			if(RLEStream_state == 0)
+			if (RLEStream_state == 0)
 			{
 				r_count = ((int16_t)data[processed]);
 				r_count_p = 0;
 				processed++;
 			}
 			RLEStream_state = 2;
-			
-			if(processed >= len)
+
+			if (processed >= len)
 				return;
-			
+
 			for (; r_count_p < r_count;)
 			{
 				LCDDriver_SendData(data[processed]);
@@ -364,4 +375,32 @@ void LCDDriver_printImage_RLECompressed_ContinueStream(int16_t *data, uint16_t l
 		else
 			processed++;
 	}
+}
+
+inline uint16_t addColor(uint16_t color, uint8_t add_r, uint8_t add_g, uint8_t add_b)
+{
+	uint8_t r = ((color >> 11) & 0x1F) + add_r;
+	uint8_t g = ((color >> 5) & 0x3F) + (uint8_t)(add_g << 1);
+	uint8_t b = ((color >> 0) & 0x1F) + add_b;
+	if (r > 31)
+		r = 31;
+	if (g > 63)
+		g = 63;
+	if (b > 31)
+		b = 31;
+	return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+inline uint16_t mixColors(uint16_t color1, uint16_t color2, float32_t opacity)
+{
+	uint8_t r = (uint8_t)((float32_t)((color1 >> 11) & 0x1F) * (1.0f - opacity) + (float32_t)((color2 >> 11) & 0x1F) * opacity);
+	uint8_t g = (uint8_t)((float32_t)((color1 >> 5) & 0x3F) * (1.0f - opacity) + (float32_t)((color2 >> 5) & 0x3F) * opacity);
+	uint8_t b = (uint8_t)((float32_t)((color1 >> 0) & 0x1F) * (1.0f - opacity) + (float32_t)((color2 >> 0) & 0x1F) * opacity);
+	if (r > 31)
+		r = 31;
+	if (g > 63)
+		g = 63;
+	if (b > 31)
+		b = 31;
+	return (uint16_t)(r << 11) | (uint16_t)(g << 5) | (uint16_t)b;
 }

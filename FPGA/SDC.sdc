@@ -12,8 +12,11 @@ derive_clock_uncertainty
 
 derive_pll_clocks -create_base_clocks
 
-set_output_delay -clock clock_crystal -max 36ps [get_ports {DAC_OUTPUT[*]}]
-set_output_delay -clock clock_crystal -min 0ps [get_ports {DAC_OUTPUT[*]}]
+set_output_delay -clock TX_PLL|altpll_component|auto_generated|pll1|clk[0] -max 36ps [get_ports {DAC_CLK}]
+set_output_delay -clock TX_PLL|altpll_component|auto_generated|pll1|clk[0] -min 0ps [get_ports {DAC_CLK}]
+set_output_delay -clock TX_PLL|altpll_component|auto_generated|pll1|clk[0] -max 36ps [get_ports {DAC_OUTPUT[*]}]
+set_output_delay -clock TX_PLL|altpll_component|auto_generated|pll1|clk[0] -min 0ps [get_ports {DAC_OUTPUT[*]}]
+
 set_output_delay -clock clock_stm32 -max 36ps [get_ports {STM32_DATA_BUS[*]}]
 set_output_delay -clock clock_stm32 -min 0ps [get_ports {STM32_DATA_BUS[*]}]
 
@@ -28,8 +31,10 @@ set_input_delay -clock clock_stm32 -min 0ps [get_ports STM32_SYNC]
 
 set_false_path -from [get_clocks {TX_PLL|altpll_component|auto_generated|pll1|clk[0]}] -to [get_clocks {clock_crystal}]
 set_false_path -from [get_clocks {TX_PLL|altpll_component|auto_generated|pll1|clk[0]}] -to [get_clocks {clock_stm32}]
+set_false_path -from [get_clocks {TX_PLL|altpll_component|auto_generated|pll1|clk[0]}] -to [get_clocks {clock_adc}]
 set_false_path -from [get_clocks {clock_stm32}] -to [get_clocks {MAIN_PLL|altpll_component|auto_generated|pll1|clk[2]}]
 set_false_path -from [get_clocks {clock_stm32}] -to [get_clocks {TX_PLL|altpll_component|auto_generated|pll1|clk[0]}]
-set_false_path -from [get_clocks {MAIN_PLL|altpll_component|auto_generated|pll1|clk[2]}] -to [get_clocks {clock_stm32}]
 set_false_path -from [get_clocks {clock_stm32}] -to [get_clocks {RX1_CICOMP_Q_clk}]
+set_false_path -from [get_clocks {MAIN_PLL|altpll_component|auto_generated|pll1|clk[2]}] -to [get_clocks {clock_stm32}]
 set_false_path -from [get_clocks {RX1_CICOMP_Q_clk}] -to [get_clocks {clock_stm32}]
+set_false_path -from [get_clocks {clock_adc}] -to [get_clocks {TX_PLL|altpll_component|auto_generated|pll1|clk[0]}]

@@ -12,11 +12,11 @@ static WiFiProcessingCommand WIFI_ProcessingCommand = WIFI_COMM_NONE;
 static void (*WIFI_ProcessingCommandCallback)(void);
 
 static SRAM char WIFI_AnswerBuffer[WIFI_ANSWER_BUFFER_SIZE] = {0};
-static IRAM2 char WIFI_readedLine[WIFI_LINE_BUFFER_SIZE] = {0};
-static IRAM2 char tmp[WIFI_LINE_BUFFER_SIZE] = {0};
-static IRAM2 int16_t WIFI_RLEStreamBuffer[WIFI_RLE_BUFFER_SIZE] = {0};
-static IRAM2 uint16_t WIFI_RLEStreamBuffer_index = 0;
-static IRAM2 uint16_t WIFI_RLEStreamBuffer_part = 0;
+static SRAM char WIFI_readedLine[WIFI_LINE_BUFFER_SIZE] = {0};
+static SRAM char tmp[WIFI_LINE_BUFFER_SIZE] = {0};
+static SRAM int16_t WIFI_RLEStreamBuffer[WIFI_RLE_BUFFER_SIZE] = {0};
+static SRAM uint16_t WIFI_RLEStreamBuffer_index = 0;
+static SRAM uint16_t WIFI_RLEStreamBuffer_part = 0;
 static uint32_t WIFI_Answer_ReadIndex = 0;
 static uint32_t commandStartTime = 0;
 static uint8_t WIFI_FoundedAP_Index = 0;
@@ -33,27 +33,28 @@ static void WIFI_printImage_stream_partial_callback(void);
 
 bool WIFI_connected = false;
 bool WIFI_CAT_server_started = false;
-volatile uint8_t WIFI_InitStateIndex = 0;
 volatile WiFiState WIFI_State = WIFI_UNDEFINED;
-static char WIFI_FoundedAP_InWork[WIFI_FOUNDED_AP_MAXCOUNT][32] = {0};
-volatile char WIFI_FoundedAP[WIFI_FOUNDED_AP_MAXCOUNT][32] = {0};
+static char WIFI_FoundedAP_InWork[WIFI_FOUNDED_AP_MAXCOUNT][MAX_WIFIPASS_LENGTH] = {0};
+volatile char WIFI_FoundedAP[WIFI_FOUNDED_AP_MAXCOUNT][MAX_WIFIPASS_LENGTH] = {0};
 bool WIFI_IP_Gotted = false;
 char WIFI_IP[15] = {0};
+char WIFI_AP[MAX_WIFIPASS_LENGTH] = {0};
 static uint16_t WIFI_HTTP_Response_Status = 0;
 static uint32_t WIFI_HTTP_Response_ContentLength = 0;
-IRAM2 static char WIFI_HOSTuri[128] = {0};
-IRAM2 static char WIFI_GETuri[128] = {0};
-IRAM2 static char WIFI_HTTRequest[128] = {0};
-IRAM2 static char WIFI_HTTResponseHTML[WIFI_HTML_RESP_BUFFER_SIZE] = {0};
+SRAM static char WIFI_HOSTuri[128] = {0};
+SRAM static char WIFI_GETuri[128] = {0};
+SRAM static char WIFI_HTTRequest[128] = {0};
+SRAM static char WIFI_HTTResponseHTML[WIFI_HTML_RESP_BUFFER_SIZE] = {0};
 
 void WIFI_Init(void)
 {
 	//wifi uart speed = 115200 * 8 = 921600  / * 16 = 1843200
 	WIFI_SendCommand("AT+UART_CUR=921600,8,1,0,1\r\n"); //uart config
-	WIFI_WaitForOk();
+	HAL_Delay(100);
+	//WIFI_WaitForOk();
 	huart6.Init.BaudRate = 921600;
 	HAL_UART_Init(&huart6);
-	
+
 	WIFI_SendCommand("ATE0\r\n"); //echo off
 	WIFI_WaitForOk();
 	WIFI_SendCommand("AT+GMR\r\n"); //system info ESP8266
@@ -68,7 +69,7 @@ void WIFI_Init(void)
 	WIFI_WaitForOk();
 	if (strstr(WIFI_readedLine, "OK") != NULL)
 	{
-		sendToDebug_str("[WIFI] WIFI Module Inited\r\n");
+		println("[WIFI] WIFI Module Inited");
 		WIFI_State = WIFI_INITED;
 
 		// check if there are active connections, if yes - don't create a new one
@@ -82,22 +83,25 @@ void WIFI_Init(void)
 				WIFI_State = WIFI_READY;
 				WIFI_connected = true;
 				LCD_UpdateQuery.StatusInfoGUI = true;
-				sendToDebug_str("[WIFI] Connected\r\n");
+				println("[WIFI] Connected");
 			}
 		}
 	}
 	if (WIFI_State == WIFI_UNDEFINED)
 	{
 		WIFI_State = WIFI_NOTFOUND;
-		sendToDebug_str("[WIFI] WIFI Module Not Found\r\n");
+		println("[WIFI] WIFI Module Not Found");
 	}
 }
 
 void WIFI_Process(void)
 {
-	char com_t[128] = {0};
-	char tz[2] = {0};
-	char com[128] = {0};
+	static IRAM2 char com_t[128] = {0};
+	static IRAM2 char tz[2] = {0};
+	static IRAM2 char com[128] = {0};
+	dma_memset(com_t, 0x00, sizeof(com_t));
+	dma_memset(tz, 0x00, sizeof(tz));
+	dma_memset(com, 0x00, sizeof(com));
 
 	if (WIFI_State == WIFI_NOTFOUND)
 		return;
@@ -112,7 +116,7 @@ void WIFI_Process(void)
 	switch (WIFI_State)
 	{
 	case WIFI_INITED:
-		sendToDebug_str3("[WIFI] Start connecting to AP: ", TRX.WIFI_AP, "\r\n");
+		//sendToDebug_str3("[WIFI] Start connecting to AP: ", TRX.WIFI_AP, "\r\n");
 		WIFI_SendCommand("AT+CWAUTOCONN=0\r\n"); //AUTOCONNECT OFF
 		WIFI_WaitForOk();
 		WIFI_SendCommand("AT+RFPOWER=82\r\n"); //rf power
@@ -139,7 +143,7 @@ void WIFI_Process(void)
 		WIFI_WaitForOk();
 		WIFI_SendCommand("AT+CIPRECVMODE=0\r\n"); //TCP receive passive mode
 		WIFI_WaitForOk();
-		
+
 		strcat(com_t, "AT+CIPSNTPCFG=1,");
 		sprintf(tz, "%d", TRX.WIFI_TIMEZONE);
 		strcat(com_t, tz);
@@ -152,27 +156,62 @@ void WIFI_Process(void)
 		WIFI_State = WIFI_CONFIGURED;
 		break;
 	case WIFI_CONFIGURED:
-		if (strcmp(TRX.WIFI_AP, "WIFI-AP") == 0)
+		if (strcmp(TRX.WIFI_AP1, "WIFI-AP") == 0 && strcmp(TRX.WIFI_AP2, "WIFI-AP") == 0 && strcmp(TRX.WIFI_AP3, "WIFI-AP") == 0 &&
+			strcmp(TRX.WIFI_PASSWORD1, "WIFI-PASSWORD") == 0 && strcmp(TRX.WIFI_PASSWORD2, "WIFI-PASSWORD") == 0 && strcmp(TRX.WIFI_PASSWORD3, "WIFI-PASSWORD") == 0)
 			break;
 		if (WIFI_stop_auto_ap_list)
 			break;
 		WIFI_ListAP_Sync();
-		bool AP_exist = false;
+		bool AP1_exist = false;
+		bool AP2_exist = false;
+		bool AP3_exist = false;
 		for (uint8_t i = 0; i < WIFI_FOUNDED_AP_MAXCOUNT; i++)
 		{
-			if (strcmp((char *)WIFI_FoundedAP[i], TRX.WIFI_AP) == 0)
-				AP_exist = true;
+			if (strcmp((char *)WIFI_FoundedAP[i], TRX.WIFI_AP1) == 0)
+				AP1_exist = true;
+			else if (strcmp((char *)WIFI_FoundedAP[i], TRX.WIFI_AP2) == 0)
+				AP2_exist = true;
+			else if (strcmp((char *)WIFI_FoundedAP[i], TRX.WIFI_AP3) == 0)
+				AP3_exist = true;
 		}
-		if (AP_exist)
+		if (AP1_exist && strlen(TRX.WIFI_PASSWORD1) > 5)
 		{
+			println("[WIFI] Start connecting to AP1: ", TRX.WIFI_AP1);
 			strcat(com, "AT+CWJAP_CUR=\"");
-			strcat(com, TRX.WIFI_AP);
+			strcat(com, TRX.WIFI_AP1);
 			strcat(com, "\",\"");
-			strcat(com, TRX.WIFI_PASSWORD);
+			strcat(com, TRX.WIFI_PASSWORD1);
 			strcat(com, "\"\r\n");
 			WIFI_SendCommand(com); //connect to AP
 			//WIFI_WaitForOk();
 			WIFI_State = WIFI_CONNECTING;
+			strcpy(WIFI_AP, TRX.WIFI_AP1);
+		}
+		if (AP2_exist && strlen(TRX.WIFI_PASSWORD2) > 5)
+		{
+			println("[WIFI] Start connecting to AP2: ", TRX.WIFI_AP2);
+			strcat(com, "AT+CWJAP_CUR=\"");
+			strcat(com, TRX.WIFI_AP2);
+			strcat(com, "\",\"");
+			strcat(com, TRX.WIFI_PASSWORD2);
+			strcat(com, "\"\r\n");
+			WIFI_SendCommand(com); //connect to AP
+			//WIFI_WaitForOk();
+			WIFI_State = WIFI_CONNECTING;
+			strcpy(WIFI_AP, TRX.WIFI_AP2);
+		}
+		if (AP3_exist && strlen(TRX.WIFI_PASSWORD3) > 5)
+		{
+			println("[WIFI] Start connecting to AP: ", TRX.WIFI_AP3);
+			strcat(com, "AT+CWJAP_CUR=\"");
+			strcat(com, TRX.WIFI_AP3);
+			strcat(com, "\",\"");
+			strcat(com, TRX.WIFI_PASSWORD3);
+			strcat(com, "\"\r\n");
+			WIFI_SendCommand(com); //connect to AP
+			//WIFI_WaitForOk();
+			WIFI_State = WIFI_CONNECTING;
+			strcpy(WIFI_AP, TRX.WIFI_AP3);
 		}
 		break;
 
@@ -180,7 +219,7 @@ void WIFI_Process(void)
 		WIFI_TryGetLine();
 		if (strstr(WIFI_readedLine, "GOT IP") != NULL)
 		{
-			sendToDebug_str("[WIFI] Connected\r\n");
+			println("[WIFI] Connected");
 			WIFI_SendCommand("AT+CWAUTOCONN=1\r\n"); //AUTOCONNECT
 			WIFI_WaitForOk();
 			WIFI_State = WIFI_READY;
@@ -189,21 +228,21 @@ void WIFI_Process(void)
 		}
 		if (strstr(WIFI_readedLine, "WIFI DISCONNECT") != NULL)
 		{
-			sendToDebug_str("[WIFI] Disconnected\r\n");
+			println("[WIFI] Disconnected");
 			//WIFI_State = WIFI_CONFIGURED;
 			WIFI_connected = false;
 			LCD_UpdateQuery.StatusInfoGUI = true;
 		}
 		if (strstr(WIFI_readedLine, "FAIL") != NULL)
 		{
-			sendToDebug_str("[WIFI] Connect failed\r\n");
+			println("[WIFI] Connect failed");
 			WIFI_State = WIFI_CONFIGURED;
 			WIFI_connected = false;
 			LCD_UpdateQuery.StatusInfoGUI = true;
 		}
 		if (strstr(WIFI_readedLine, "ERROR") != NULL)
 		{
-			sendToDebug_str("[WIFI] Connect error\r\n");
+			println("[WIFI] Connect error");
 			WIFI_State = WIFI_CONFIGURED;
 			WIFI_connected = false;
 			LCD_UpdateQuery.StatusInfoGUI = true;
@@ -214,7 +253,7 @@ void WIFI_Process(void)
 		WIFI_TryGetLine();
 		WIFI_ProcessingCommandCallback = 0;
 		//receive commands from WIFI clients
-		if (strstr(WIFI_readedLine, "+IPD") != NULL && WIFI_ProcessingCommand != WIFI_COMM_TCP_GET_RESPONSE)
+		if (strstr(WIFI_readedLine, "+IPD") != NULL && WIFI_ProcessingCommand != WIFI_COMM_TCP_GET_RESPONSE && WIFI_CAT_server_started)
 		{
 			char *wifi_incoming_link_id = strchr(WIFI_readedLine, ',');
 			if (wifi_incoming_link_id == NULL)
@@ -245,10 +284,18 @@ void WIFI_Process(void)
 			char *wifi_incoming_data_end = wifi_incoming_data + wifi_incoming_length_uint;
 			*wifi_incoming_data_end = 0x00;
 
-			if (WIFI_DEBUG)
-				sendToDebug_str3("[WIFI] Command received: ", wifi_incoming_data, "\r\n");
+			if (TRX.Debug_Type == TRX_DEBUG_WIFI)
+				println("[WIFI] Command received: ", wifi_incoming_data);
 			if (wifi_incoming_length_uint > 0)
 				CAT_SetWIFICommand(wifi_incoming_data, wifi_incoming_length_uint, wifi_incoming_link_id_uint);
+		}
+		if (strstr(WIFI_readedLine, "WIFI DISCONNECT") != NULL)
+		{
+			println("[WIFI] Disconnected");
+			WIFI_State = WIFI_CONFIGURED;
+			WIFI_connected = false;
+			WIFI_IP_Gotted = false;
+			LCD_UpdateQuery.StatusInfoGUI = true;
 		}
 		break;
 
@@ -258,7 +305,6 @@ void WIFI_Process(void)
 			WIFI_State = WIFI_READY;
 		else
 			WIFI_State = WIFI_CONFIGURED;
-		WIFI_InitStateIndex = 0;
 		break;
 
 	case WIFI_PROCESS_COMMAND:
@@ -272,18 +318,20 @@ void WIFI_Process(void)
 		{
 			//ListAP Command Ended
 			if (WIFI_ProcessingCommand == WIFI_COMM_LISTAP)
+			{
 				for (uint8_t i = 0; i < WIFI_FOUNDED_AP_MAXCOUNT; i++)
 				{
 					strcpy((char *)&WIFI_FoundedAP[i], (char *)&WIFI_FoundedAP_InWork[i]);
 					WIFI_stop_auto_ap_list = false;
 				}
+			}
 			//Create Server Command Ended
 			if (WIFI_ProcessingCommand == WIFI_COMM_CREATESERVER)
 			{
 				WIFI_SendCommand("AT+CIPSTO=3600\r\n"); //Connection timeout
 				WIFI_WaitForOk();
 				WIFI_CAT_server_started = true;
-				sendToDebug_strln("[WIFI] CAT Server started on port 6784");
+				println("[WIFI] CAT Server started on port 6784");
 				WIFI_State = WIFI_READY;
 			}
 			//SNTP Command Ended
@@ -326,34 +374,41 @@ void WIFI_Process(void)
 					if (end != NULL)
 					{
 						*end = 0x00;
-						strcat((char *)&WIFI_FoundedAP_InWork[WIFI_FoundedAP_Index], start);
-						if (WIFI_FoundedAP_Index < WIFI_FOUNDED_AP_MAXCOUNT)
-							WIFI_FoundedAP_Index++;
+						if (strlen(start) > 0)
+						{
+							strcat((char *)&WIFI_FoundedAP_InWork[WIFI_FoundedAP_Index], start);
+							if (WIFI_FoundedAP_Index < (WIFI_FOUNDED_AP_MAXCOUNT - 1))
+								WIFI_FoundedAP_Index++;
+						}
 					}
 				}
 			}
-			else if (WIFI_ProcessingCommand == WIFI_COMM_GETSNTP) //Get and sync SNMP time
-			{
-				char *hrs_str = strchr(WIFI_readedLine, ' ');
-				if (hrs_str != NULL)
+			else if (WIFI_ProcessingCommand == WIFI_COMM_GETSNTP) //Get and sync SNTP time
+			{													  //Mon Jan 18 20:17:56 2021
+				char *sntp_str = strchr(WIFI_readedLine, ' ');
+				if (sntp_str != NULL)
 				{
-					hrs_str = hrs_str + 1;
-					hrs_str = strchr(hrs_str, ' ');
-					if (hrs_str != NULL)
+					sntp_str = sntp_str + 1;
+					char *month_str = sntp_str;
+					sntp_str = strchr(sntp_str, ' ');
+					if (sntp_str != NULL)
 					{
-						hrs_str = hrs_str + 1;
-						hrs_str = strchr(hrs_str, ' ');
-						if (hrs_str != NULL)
+						*sntp_str = 0x00;
+						sntp_str = sntp_str + 1;
+						char *day_str = sntp_str;
+						sntp_str = strchr(sntp_str, ' ');
+						if (sntp_str != NULL)
 						{
-							hrs_str = hrs_str + 1;
+							*sntp_str = 0x00;
+							sntp_str = sntp_str + 1;
 							//hh:mm:ss here
-							char *min_str = strchr(hrs_str, ':');
+							char *min_str = strchr(sntp_str, ':');
 							if (min_str != NULL)
 							{
 								min_str = min_str + 1;
 								char *sec_str = strchr(min_str, ':');
 								char *year_str = strchr(min_str, ' ');
-								char *end = strchr(hrs_str, ':');
+								char *end = strchr(sntp_str, ':');
 								if (sec_str != NULL && year_str != NULL && end != NULL)
 								{
 									sec_str = sec_str + 1;
@@ -368,26 +423,93 @@ void WIFI_Process(void)
 										{
 											*end = 0x00;
 											//split strings here
-											uint8_t hrs = (uint8_t)atoi(hrs_str);
+											uint8_t hrs = (uint8_t)atoi(sntp_str);
 											uint8_t min = (uint8_t)atoi(min_str);
 											uint8_t sec = (uint8_t)atoi(sec_str);
 											uint16_t year = (uint16_t)atoi(year_str);
+											uint16_t year_short = (uint16_t)atoi(year_str + 2);
+											uint16_t month = 1;
+											if (strstr(month_str, "Jan") != NULL)
+												month = 1;
+											if (strstr(month_str, "Feb") != NULL)
+												month = 2;
+											if (strstr(month_str, "Mar") != NULL)
+												month = 3;
+											if (strstr(month_str, "Apr") != NULL)
+												month = 4;
+											if (strstr(month_str, "May") != NULL)
+												month = 5;
+											if (strstr(month_str, "Jun") != NULL)
+												month = 6;
+											if (strstr(month_str, "Jul") != NULL)
+												month = 7;
+											if (strstr(month_str, "Aug") != NULL)
+												month = 8;
+											if (strstr(month_str, "Sep") != NULL)
+												month = 9;
+											if (strstr(month_str, "Oct") != NULL)
+												month = 10;
+											if (strstr(month_str, "Nov") != NULL)
+												month = 11;
+											if (strstr(month_str, "Dec") != NULL)
+												month = 12;
+											uint16_t day = (uint16_t)atoi(day_str);
 											//save to RTC clock
 											if (year > 2018)
 											{
-												RTC_TimeTypeDef sTime;
-												sTime.TimeFormat = RTC_HOURFORMAT12_PM;
-												sTime.SubSeconds = 0;
-												sTime.SecondFraction = 0;
-												sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-												sTime.StoreOperation = RTC_STOREOPERATION_SET;
-												sTime.Hours = hrs;
-												sTime.Minutes = min;
-												sTime.Seconds = sec;
-												BKPSRAM_Enable();
-												HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+												uint32_t currTime = RTC->TR;
+												uint8_t currHours = ((currTime >> 20) & 0x03) * 10 + ((currTime >> 16) & 0x0f);
+												uint8_t currMinutes = ((currTime >> 12) & 0x07) * 10 + ((currTime >> 8) & 0x0f);
+												uint8_t currSeconds = ((currTime >> 4) & 0x07) * 10 + ((currTime >> 0) & 0x0f);
+												//clock diff
+												if (currHours != hrs || currMinutes != min || currSeconds != sec)
+												{
+													int16_t secDiff = (currHours - hrs) * 3600 + (currMinutes - min) * 60 + (currSeconds - sec);
+													println("[RTC] Current clock error in sec: ", secDiff);
+
+													if (secDiff < -1 || secDiff > 1) //do recalibration
+													{
+														if (secDiff < 0)
+															CALIBRATE.RTC_Calibration--;
+														if (secDiff > 0)
+															CALIBRATE.RTC_Calibration++;
+														if (CALIBRATE.RTC_Calibration < -511)
+															CALIBRATE.RTC_Calibration = -511;
+														if (CALIBRATE.RTC_Calibration > 511)
+															CALIBRATE.RTC_Calibration = 511;
+														NeedSaveCalibration = true;
+
+														RTC_Calibration();
+														println("[RTC] New RTC Calibration value: ", CALIBRATE.RTC_Calibration);
+													}
+
+													//set time
+													RTC_TimeTypeDef sTime;
+													sTime.TimeFormat = RTC_HOURFORMAT12_PM;
+													sTime.SubSeconds = 0;
+													sTime.SecondFraction = 0;
+													sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+													sTime.StoreOperation = RTC_STOREOPERATION_SET;
+													sTime.Hours = hrs;
+													sTime.Minutes = min;
+													sTime.Seconds = sec;
+													RTC_DateTypeDef sDate;
+													sDate.Date = day;
+													sDate.Month = month;
+													sDate.Year = year_short;
+													BKPSRAM_Enable();
+													HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+													HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+													println("[RTC] New time set")
+												}
 												TRX_SNTP_Synced = HAL_GetTick();
-												sendToDebug_str("[WIFI] TIME SYNCED\r\n");
+												println("[WIFI] TIME SYNCED");
+
+												//reset SNTP
+												char com_t[64] = {0};
+												sprintf(com_t, "AT+CIPSNTPCFG=1,%d,\"0.pool.ntp.org\",\"1.pool.ntp.org\"\r\n", TRX.WIFI_TIMEZONE);
+												WIFI_SendCommand(com_t); //configure SNMP
+												WIFI_WaitForOk();
 											}
 										}
 									}
@@ -412,9 +534,11 @@ void WIFI_Process(void)
 						if (end != NULL)
 						{
 							*end = 0x00;
-							strcat(WIFI_IP, start);
-							sendToDebug_str3("[WIFI] GOT IP: ", WIFI_IP, "\r\n");
+							strcpy(WIFI_IP, start);
+							println("[WIFI] GOT IP: ", WIFI_IP);
 							WIFI_IP_Gotted = true;
+							if (LCD_systemMenuOpened)
+								LCD_UpdateQuery.SystemMenuRedraw = true;
 						}
 					}
 				}
@@ -437,7 +561,7 @@ void WIFI_Process(void)
 	}
 }
 
-bool WIFI_GetSNTPTime(void *callback)
+bool WIFI_GetSNTPTime(void (*callback)(void))
 {
 	if (WIFI_State != WIFI_READY)
 		return false;
@@ -448,7 +572,7 @@ bool WIFI_GetSNTPTime(void *callback)
 	return true;
 }
 
-bool WIFI_GetIP(void *callback)
+bool WIFI_GetIP(void (*callback)(void))
 {
 	if (WIFI_State != WIFI_READY)
 		return false;
@@ -459,11 +583,11 @@ bool WIFI_GetIP(void *callback)
 	return true;
 }
 
-void WIFI_ListAP(void *callback)
+bool WIFI_ListAP(void (*callback)(void))
 {
 	if (WIFI_State != WIFI_READY && WIFI_State != WIFI_CONFIGURED)
-		return;
-	if (WIFI_State == WIFI_CONFIGURED && !WIFI_stop_auto_ap_list) // stop auto-connection when searching for networks
+		return false;
+	if (WIFI_State == WIFI_CONFIGURED && !WIFI_stop_auto_ap_list && WIFI_ProcessingCommand == WIFI_COMM_LISTAP) // stop auto-connection when searching for networks
 	{
 		WIFI_stop_auto_ap_list = true;
 		WIFI_WaitForOk();
@@ -474,8 +598,9 @@ void WIFI_ListAP(void *callback)
 	WIFI_FoundedAP_Index = 0;
 
 	for (uint8_t i = 0; i < WIFI_FOUNDED_AP_MAXCOUNT; i++)
-		memset((char *)&WIFI_FoundedAP_InWork[i], 0x00, sizeof WIFI_FoundedAP_InWork[i]);
+		dma_memset((char *)&WIFI_FoundedAP_InWork[i], 0x00, sizeof WIFI_FoundedAP_InWork[i]);
 	WIFI_SendCommand("AT+CWLAP\r\n"); //List AP
+	return true;
 }
 
 static bool WIFI_ListAP_Sync(void)
@@ -483,7 +608,7 @@ static bool WIFI_ListAP_Sync(void)
 	WIFI_SendCommand("AT+CWLAP\r\n"); //List AP
 	WIFI_FoundedAP_Index = 0;
 	for (uint8_t i = 0; i < WIFI_FOUNDED_AP_MAXCOUNT; i++)
-		memset((char *)&WIFI_FoundedAP[i], 0x00, sizeof WIFI_FoundedAP[i]);
+		dma_memset((char *)&WIFI_FoundedAP[i], 0x00, sizeof WIFI_FoundedAP[i]);
 	uint32_t startTime = HAL_GetTick();
 	char *sep = "OK";
 	char *istr;
@@ -512,7 +637,7 @@ static bool WIFI_ListAP_Sync(void)
 				{
 					*end = 0x00;
 					strcat((char *)&WIFI_FoundedAP[WIFI_FoundedAP_Index], start);
-					if (WIFI_FoundedAP_Index < WIFI_FOUNDED_AP_MAXCOUNT)
+					if (WIFI_FoundedAP_Index < (WIFI_FOUNDED_AP_MAXCOUNT - 1))
 						WIFI_FoundedAP_Index++;
 				}
 			}
@@ -529,20 +654,22 @@ void WIFI_GoSleep(void)
 	WIFI_ProcessingCommand = WIFI_COMM_DEEPSLEEP;
 	WIFI_SendCommand("AT+GSLP=1000\r\n"); //go sleep
 	WIFI_State = WIFI_SLEEP;
+	WIFI_connected = false;
+	LCD_UpdateQuery.StatusInfoGUI = true;
 }
 
 static void WIFI_SendCommand(char *command)
 {
 	HAL_UART_AbortReceive(&huart6);
 	HAL_UART_AbortReceive_IT(&huart6);
-	memset(WIFI_AnswerBuffer, 0x00, sizeof(WIFI_AnswerBuffer));
+	dma_memset(WIFI_AnswerBuffer, 0x00, sizeof(WIFI_AnswerBuffer));
 	WIFI_Answer_ReadIndex = 0;
 	HAL_UART_Receive_DMA(&huart6, (uint8_t *)WIFI_AnswerBuffer, WIFI_ANSWER_BUFFER_SIZE);
 	HAL_UART_Transmit_IT(&huart6, (uint8_t *)command, (uint16_t)strlen(command));
 	commandStartTime = HAL_GetTick();
 	HAL_Delay(WIFI_COMMAND_DELAY);
-	if (WIFI_DEBUG) //DEBUG
-		sendToDebug_str2("WIFI_S: ", command);
+	if (TRX.Debug_Type == TRX_DEBUG_WIFI) //DEBUG
+		print("WIFI_S: ", command);
 }
 
 static bool WIFI_WaitForOk(void)
@@ -572,14 +699,15 @@ static bool WIFI_WaitForOk(void)
 
 static bool WIFI_TryGetLine(void)
 {
-	memset(WIFI_readedLine, 0x00, sizeof(WIFI_readedLine));
-	memset(tmp, 0x00, sizeof(tmp));
+	dma_memset(WIFI_readedLine, 0x00, sizeof(WIFI_readedLine));
+	dma_memset(tmp, 0x00, sizeof(tmp));
 
+	Aligned_CleanInvalidateDCache_by_Addr((uint32_t)WIFI_AnswerBuffer, sizeof(WIFI_AnswerBuffer));
 	uint16_t dma_index = WIFI_ANSWER_BUFFER_SIZE - (uint16_t)__HAL_DMA_GET_COUNTER(huart6.hdmarx);
 	if (WIFI_Answer_ReadIndex == dma_index)
 		return false;
-	
-	if(dma_index < WIFI_Answer_ReadIndex)
+
+	if (dma_index < WIFI_Answer_ReadIndex)
 	{
 		//tail
 		uint32_t len = WIFI_ANSWER_BUFFER_SIZE - WIFI_Answer_ReadIndex;
@@ -592,32 +720,32 @@ static bool WIFI_TryGetLine(void)
 		//head
 		strncpy(tmp, &WIFI_AnswerBuffer[WIFI_Answer_ReadIndex], dma_index - WIFI_Answer_ReadIndex);
 	}
-	
+
 	if (tmp[0] == '\0')
 		return false;
 
 	char *istr = strchr(tmp, '\n'); // look for the end of the line
 	if (istr == NULL)
 		return false;
-	
+
 	uint32_t len = (uint16_t)((uint32_t)istr - (uint32_t)tmp + 1);
-	if(len > WIFI_LINE_BUFFER_SIZE)
+	if (len > WIFI_LINE_BUFFER_SIZE)
 		return false;
 	strncpy(WIFI_readedLine, tmp, len);
-	
+
 	WIFI_Answer_ReadIndex += len;
 	if (WIFI_Answer_ReadIndex >= WIFI_ANSWER_BUFFER_SIZE)
 	{
 		WIFI_Answer_ReadIndex -= WIFI_ANSWER_BUFFER_SIZE;
 	}
 
-	if (WIFI_DEBUG) //DEBUG
-		sendToDebug_str2("WIFI_R: ", WIFI_readedLine);
+	if (TRX.Debug_Type == TRX_DEBUG_WIFI) //DEBUG
+		print("WIFI_R: ", WIFI_readedLine);
 
 	return true;
 }
 
-bool WIFI_StartCATServer(void *callback)
+bool WIFI_StartCATServer(void (*callback)(void))
 {
 	if (WIFI_State != WIFI_READY)
 		return false;
@@ -628,7 +756,7 @@ bool WIFI_StartCATServer(void *callback)
 	return true;
 }
 
-bool WIFI_SendCatAnswer(char *data, uint32_t link_id, void *callback)
+bool WIFI_SendCatAnswer(char *data, uint32_t link_id, void (*callback)(void))
 {
 	if (WIFI_State != WIFI_READY)
 		return false;
@@ -647,7 +775,7 @@ bool WIFI_SendCatAnswer(char *data, uint32_t link_id, void *callback)
 	return true;
 }
 
-bool WIFI_UpdateFW(void *callback)
+bool WIFI_UpdateFW(void (*callback)(void))
 {
 	if (WIFI_State != WIFI_READY)
 		return false;
@@ -667,7 +795,7 @@ static void WIFI_getHTTPResponse(void)
 	if (istr != NULL)
 	{
 		istr += 7;
-		char *istr2 = strstr(WIFI_readedLine, ":");
+		char *istr2 = strchr(WIFI_readedLine, ':');
 		if (istr2 != NULL)
 		{
 			*istr2 = 0;
@@ -675,19 +803,26 @@ static void WIFI_getHTTPResponse(void)
 			istr2++;
 			strcpy(WIFI_HTTResponseHTML, istr2);
 			commandStartTime = HAL_GetTick();
-			
+
 			uint32_t start_time = HAL_GetTick();
-			while(strlen(WIFI_HTTResponseHTML) < response_length && strlen(WIFI_HTTResponseHTML) < sizeof(WIFI_HTTResponseHTML) && (HAL_GetTick() - start_time) < 5000)
+			uint32_t len = strlen(WIFI_HTTResponseHTML);
+			while (len < response_length && len < sizeof(WIFI_HTTResponseHTML) && (HAL_GetTick() - start_time) < 5000)
 			{
-				if(WIFI_TryGetLine())
-					strcat(WIFI_HTTResponseHTML, WIFI_readedLine);
+				if (WIFI_TryGetLine())
+				{
+					if (len + strlen(WIFI_readedLine) < sizeof(WIFI_HTTResponseHTML))
+						strcat(WIFI_HTTResponseHTML, WIFI_readedLine);
+					else
+						break;
+				}
+				len = strlen(WIFI_HTTResponseHTML);
 			}
 			char *istr3 = WIFI_HTTResponseHTML;
 			istr3 += response_length;
 			*istr3 = 0;
-			
+
 			//get status
-			char *istr4 = strstr(WIFI_HTTResponseHTML, " ");
+			char *istr4 = strchr(WIFI_HTTResponseHTML, ' ');
 			if (istr4 != NULL)
 			{
 				char *istr5 = istr4 + 4;
@@ -695,51 +830,54 @@ static void WIFI_getHTTPResponse(void)
 				WIFI_HTTP_Response_Status = (uint16_t)(atoi(istr4));
 				*istr5 = ' ';
 			}
-			
+
 			//get content length
 			istr4 = strstr(WIFI_HTTResponseHTML, "Content-Length: ");
 			if (istr4 != NULL)
 			{
 				istr4 += 16;
-				char *istr5 = strstr(istr4, "\r");
-				*istr5 = 0;
-				WIFI_HTTP_Response_ContentLength = (uint32_t)(atoi(istr4));
-				*istr5 = ' ';
+				char *istr5 = strchr(istr4, '\r');
+				if (istr5 != NULL)
+				{
+					*istr5 = 0;
+					WIFI_HTTP_Response_ContentLength = (uint32_t)(atoi(istr4));
+					*istr5 = ' ';
+				}
 			}
-			
+
 			//get response body
 			char *istr6 = strstr(WIFI_HTTResponseHTML, "\r\n\r\n");
 			if (istr6 != NULL)
 			{
 				istr6 += 4;
-				strcpy(WIFI_HTTResponseHTML , istr6);
+				strcpy(WIFI_HTTResponseHTML, istr6);
 			}
-			
+
 			//partial callback for image printing
 			readed_body_length += strlen(WIFI_HTTResponseHTML);
 			if (WIFI_ProcessingCommandCallback == WIFI_printImage_stream_callback)
 				WIFI_printImage_stream_partial_callback();
-			
+
 			//may be partial content? continue downloading
 			start_time = HAL_GetTick();
-			if(readed_body_length < WIFI_HTTP_Response_ContentLength && (HAL_GetTick() - start_time) < 3000)
+			if (readed_body_length < WIFI_HTTP_Response_ContentLength && (HAL_GetTick() - start_time) < 3000)
 			{
-				while(readed_body_length < WIFI_HTTP_Response_ContentLength && strlen(WIFI_HTTResponseHTML) < sizeof(WIFI_HTTResponseHTML) && (HAL_GetTick() - start_time) < 3000)
+				while (readed_body_length < WIFI_HTTP_Response_ContentLength && strlen(WIFI_HTTResponseHTML) < sizeof(WIFI_HTTResponseHTML) && (HAL_GetTick() - start_time) < 3000)
 				{
-					if(WIFI_TryGetLine())
+					if (WIFI_TryGetLine())
 					{
 						istr = strstr(WIFI_readedLine, "+IPD");
 						if (istr != NULL)
 						{
 							istr += 7;
-							istr2 = strstr(WIFI_readedLine, ":");
+							istr2 = strchr(WIFI_readedLine, ':');
 							if (istr2 != NULL)
 							{
 								*istr2 = 0;
 								response_length = atoi(istr);
 								istr2++;
 								strncat(WIFI_HTTResponseHTML, istr2, response_length);
-								
+
 								//partial callback for image printing
 								readed_body_length += strlen(WIFI_HTTResponseHTML);
 								if (WIFI_ProcessingCommandCallback == WIFI_printImage_stream_callback)
@@ -749,11 +887,11 @@ static void WIFI_getHTTPResponse(void)
 					}
 				}
 			}
-			
+
 			//cut body on content-length
-			if(strlen(WIFI_HTTResponseHTML) > WIFI_HTTP_Response_ContentLength)
+			if (strlen(WIFI_HTTResponseHTML) > WIFI_HTTP_Response_ContentLength)
 				WIFI_HTTResponseHTML[WIFI_HTTP_Response_ContentLength] = 0;
-			
+
 			WIFI_ProcessingCommand = WIFI_COMM_NONE;
 			WIFI_State = WIFI_READY;
 			if (WIFI_ProcessingCommandCallback != NULL)
@@ -766,7 +904,7 @@ static void WIFI_sendHTTPRequest(void)
 {
 	WIFI_State = WIFI_PROCESS_COMMAND;
 	WIFI_ProcessingCommand = WIFI_COMM_TCP_GET_RESPONSE;
-	memset(WIFI_HTTRequest, 0x00, sizeof(WIFI_HTTRequest));
+	dma_memset(WIFI_HTTRequest, 0x00, sizeof(WIFI_HTTRequest));
 	strcat(WIFI_HTTRequest, "GET ");
 	strcat(WIFI_HTTRequest, WIFI_GETuri);
 	strcat(WIFI_HTTRequest, " HTTP/1.1\r\n");
@@ -779,7 +917,7 @@ static void WIFI_sendHTTPRequest(void)
 	WIFI_SendCommand(WIFI_HTTRequest);
 }
 
-bool WIFI_getHTTPpage(char* host, char* url, void *callback, bool https)
+bool WIFI_getHTTPpage(char *host, char *url, void (*callback)(void), bool https)
 {
 	if (WIFI_State != WIFI_READY)
 		return false;
@@ -787,27 +925,27 @@ bool WIFI_getHTTPpage(char* host, char* url, void *callback, bool https)
 	WIFI_ProcessingCommand = WIFI_COMM_TCP_CONNECT;
 	WIFI_ProcessingCommandCallback = callback;
 	WIFI_HTTP_Response_Status = 0;
-	
-	memset(WIFI_HOSTuri, 0x00, sizeof(WIFI_HOSTuri));
+
+	dma_memset(WIFI_HOSTuri, 0x00, sizeof(WIFI_HOSTuri));
 	strcat(WIFI_HOSTuri, "AT+CIPSTART=0,");
-	if(!https)
+	if (!https)
 		strcat(WIFI_HOSTuri, "\"TCP\"");
 	else
 		strcat(WIFI_HOSTuri, "\"SSL\"");
 	strcat(WIFI_HOSTuri, ",\"");
 	strcat(WIFI_HOSTuri, host);
-	
-	if(!https)
+
+	if (!https)
 		strcat(WIFI_HOSTuri, "\",80,10\r\n");
 	else
 		strcat(WIFI_HOSTuri, "\",443,10\r\n");
-	
-	memset(WIFI_GETuri, 0x00, sizeof(WIFI_GETuri));
+
+	dma_memset(WIFI_GETuri, 0x00, sizeof(WIFI_GETuri));
 	strcat(WIFI_GETuri, url);
-	
+
 	WIFI_SendCommand(WIFI_HOSTuri);
-	
-	memset(WIFI_HOSTuri, 0x00, sizeof(WIFI_HOSTuri));
+
+	dma_memset(WIFI_HOSTuri, 0x00, sizeof(WIFI_HOSTuri));
 	strcat(WIFI_HOSTuri, host);
 	return true;
 }
@@ -815,7 +953,7 @@ bool WIFI_getHTTPpage(char* host, char* url, void *callback, bool https)
 static void WIFI_printText_callback(void)
 {
 	LCDDriver_Fill(BG_COLOR);
-	if(WIFI_HTTP_Response_Status == 200)
+	if (WIFI_HTTP_Response_Status == 200)
 	{
 		LCDDriver_printTextFont(WIFI_HTTResponseHTML, 10, 20, FG_COLOR, BG_COLOR, &FreeSans9pt7b);
 	}
@@ -825,33 +963,35 @@ static void WIFI_printText_callback(void)
 
 static void WIFI_printImage_stream_partial_callback(void)
 {
-	memset(WIFI_RLEStreamBuffer, 0x00, sizeof(WIFI_RLEStreamBuffer));
+	dma_memset(WIFI_RLEStreamBuffer, 0x00, sizeof(WIFI_RLEStreamBuffer));
 	//parse hex output from server (convert to bin)
 	char *istr = WIFI_HTTResponseHTML;
 	char hex[5] = {0};
 	WIFI_RLEStreamBuffer_index = 0;
-	int16_t val =0;
-	while(*istr != 0 && (strlen(WIFI_HTTResponseHTML) >= ((WIFI_RLEStreamBuffer_index * 4) + 4)))
+	int16_t val = 0;
+	uint32_t len = strlen(WIFI_HTTResponseHTML);
+	while (*istr != 0 && (len >= ((WIFI_RLEStreamBuffer_index * 4) + 4)))
 	{
 		//Get hex
-		strncpy(hex, istr , 4);
+		strncpy(hex, istr, 4);
 		val = (int16_t)(strtol(hex, NULL, 16));
 		istr += 4;
 		//Save
 		WIFI_RLEStreamBuffer[WIFI_RLEStreamBuffer_index] = val;
 		WIFI_RLEStreamBuffer_index++;
 	}
+
 	//send to LCD RLE stream decoder
 	LCDDriver_printImage_RLECompressed_ContinueStream(WIFI_RLEStreamBuffer, WIFI_RLEStreamBuffer_index);
-	
+
 	//clean answer
-	if(strlen(WIFI_HTTResponseHTML) > (WIFI_RLEStreamBuffer_index * 4)) //part buffer preceed, move to begin
+	if (strlen(WIFI_HTTResponseHTML) > (WIFI_RLEStreamBuffer_index * 4)) //part buffer preceed, move to begin
 	{
 		istr = &WIFI_HTTResponseHTML[(WIFI_RLEStreamBuffer_index * 4)];
 		strcpy(WIFI_HTTResponseHTML, istr);
 	}
 	else
-		memset(WIFI_HTTResponseHTML, 0x00, sizeof(WIFI_HTTResponseHTML));
+		dma_memset(WIFI_HTTResponseHTML, 0x00, sizeof(WIFI_HTTResponseHTML));
 }
 
 static void WIFI_printImage_stream_callback(void)
@@ -862,24 +1002,24 @@ static void WIFI_printImage_stream_callback(void)
 static void WIFI_printImage_callback(void)
 {
 	LCDDriver_Fill(BG_COLOR);
-	if(WIFI_HTTP_Response_Status == 200)
+	if (WIFI_HTTP_Response_Status == 200)
 	{
-		char *istr1 = strstr(WIFI_HTTResponseHTML, ",");
+		char *istr1 = strchr(WIFI_HTTResponseHTML, ',');
 		if (istr1 != NULL)
 		{
 			*istr1 = 0;
 			uint32_t filesize = atoi(WIFI_HTTResponseHTML);
 			istr1++;
-			char *istr2 = strstr(istr1, ",");
+			char *istr2 = strchr(istr1, ',');
 			if (istr2 != NULL)
 			{
 				*istr2 = 0;
 				uint16_t width = (uint16_t)(atoi(istr1));
 				istr2++;
-				
+
 				uint16_t height = (uint16_t)(atoi(istr2));
 
-				if(filesize > 0 && width > 0  && height > 0)
+				if (filesize > 0 && width > 0 && height > 0)
 				{
 					LCDDriver_printImage_RLECompressed_StartStream(LCD_WIDTH / 2 - width / 2, LCD_HEIGHT / 2 - height / 2, width, height);
 					WIFI_RLEStreamBuffer_part = 0;
@@ -895,7 +1035,7 @@ static void WIFI_printImage_callback(void)
 void WIFI_getRDA(void)
 {
 	LCDDriver_Fill(BG_COLOR);
-	if(WIFI_connected && WIFI_State == WIFI_READY)
+	if (WIFI_connected && WIFI_State == WIFI_READY)
 		LCDDriver_printTextFont("Loading...", 10, 20, FG_COLOR, BG_COLOR, &FreeSans9pt7b);
 	else
 	{
@@ -910,7 +1050,7 @@ void WIFI_getRDA(void)
 void WIFI_getPropagination(void)
 {
 	LCDDriver_Fill(BG_COLOR);
-	if(WIFI_connected && WIFI_State == WIFI_READY)
+	if (WIFI_connected && WIFI_State == WIFI_READY)
 		LCDDriver_printTextFont("Loading...", 10, 20, FG_COLOR, BG_COLOR, &FreeSans9pt7b);
 	else
 	{

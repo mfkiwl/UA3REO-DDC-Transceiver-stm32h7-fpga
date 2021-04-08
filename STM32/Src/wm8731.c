@@ -7,13 +7,13 @@
 #include "usbd_audio_if.h"
 
 //Public variables
-uint32_t WM8731_DMA_samples = 0;									// count the number of samples passed to the audio codec
-bool WM8731_DMA_state = true;										// what part of the buffer we are working with, true - compleate; false - half
-bool WM8731_Buffer_underrun = false;								// lack of data in the buffer from the audio processor
-IRAM2 int32_t CODEC_Audio_Buffer_RX[CODEC_AUDIO_BUFFER_SIZE] = {0}; // audio codec ring buffers
-IRAM2 int32_t CODEC_Audio_Buffer_TX[CODEC_AUDIO_BUFFER_SIZE] = {0};
-bool WM8731_Beeping;														//Beeping flag
-bool WM8731_Muting; 														//Muting flag
+uint32_t WM8731_DMA_samples = 0;								   // count the number of samples passed to the audio codec
+bool WM8731_DMA_state = true;									   // what part of the buffer we are working with, true - compleate; false - half
+bool WM8731_Buffer_underrun = false;							   // lack of data in the buffer from the audio processor
+SRAM int32_t CODEC_Audio_Buffer_RX[CODEC_AUDIO_BUFFER_SIZE] = {0}; // audio codec ring buffers
+SRAM int32_t CODEC_Audio_Buffer_TX[CODEC_AUDIO_BUFFER_SIZE] = {0};
+bool WM8731_Beeping; //Beeping flag
+bool WM8731_Muting;	 //Muting flag
 
 //Private variables
 
@@ -37,13 +37,13 @@ void WM8731_start_i2s_and_dma(void)
 // clear the audio codec and USB audio buffer
 void WM8731_CleanBuffer(void)
 {
-	memset(CODEC_Audio_Buffer_RX, 0x00, sizeof CODEC_Audio_Buffer_RX);
-	memset(CODEC_Audio_Buffer_TX, 0x00, sizeof CODEC_Audio_Buffer_TX);
+	dma_memset(CODEC_Audio_Buffer_RX, 0x00, sizeof CODEC_Audio_Buffer_RX);
+	dma_memset(CODEC_Audio_Buffer_TX, 0x00, sizeof CODEC_Audio_Buffer_TX);
 	Aligned_CleanDCache_by_Addr((uint32_t *)&CODEC_Audio_Buffer_RX[0], sizeof(CODEC_Audio_Buffer_RX));
 	Aligned_CleanDCache_by_Addr((uint32_t *)&CODEC_Audio_Buffer_TX[0], sizeof(CODEC_Audio_Buffer_TX));
-	memset(USB_AUDIO_rx_buffer_a, 0x00, sizeof USB_AUDIO_rx_buffer_a);
-	memset(USB_AUDIO_rx_buffer_b, 0x00, sizeof USB_AUDIO_rx_buffer_a);
-	memset(USB_AUDIO_tx_buffer, 0x00, sizeof USB_AUDIO_tx_buffer);
+	dma_memset(USB_AUDIO_rx_buffer_a, 0x00, sizeof USB_AUDIO_rx_buffer_a);
+	dma_memset(USB_AUDIO_rx_buffer_b, 0x00, sizeof USB_AUDIO_rx_buffer_a);
+	dma_memset(USB_AUDIO_tx_buffer, 0x00, sizeof USB_AUDIO_tx_buffer);
 	ResetAGC();
 }
 
@@ -55,8 +55,8 @@ static uint8_t WM8731_SendI2CCommand(uint8_t reg, uint8_t value)
 	while (st != 0 && repeats < 3)
 	{
 		i2c_beginTransmission_u8(&I2C_WM8731, B8(0011010)); //I2C_ADDRESS_WM8731 00110100
-		i2c_write_u8(&I2C_WM8731, reg);					   // MSB
-		i2c_write_u8(&I2C_WM8731, value);				   // MSB
+		i2c_write_u8(&I2C_WM8731, reg);						// MSB
+		i2c_write_u8(&I2C_WM8731, value);					// MSB
 		st = i2c_endTransmission(&I2C_WM8731);
 		if (st != 0)
 			repeats++;
@@ -66,11 +66,11 @@ static uint8_t WM8731_SendI2CCommand(uint8_t reg, uint8_t value)
 }
 
 // switch to TX mode (mute the speaker, etc.)
-void WM8731_TX_mode(void)
+/*void WM8731_TX_mode(void)
 {
 	WM8731_SendI2CCommand(B8(00000101), B8(10000000)); //R2 Left Headphone Out
 	WM8731_SendI2CCommand(B8(00000111), B8(10000000)); //R3 Right Headphone Out
-	WM8731_SendI2CCommand(B8(00001010), B8(00011110)); //R5 Digital Audio Path Control
+	WM8731_SendI2CCommand(B8(00001010), B8(00011000)); //R5 Digital Audio Path Control
 	if (TRX.InputType_LINE)							   //line
 	{
 		WM8731_SendI2CCommand(B8(00000000), B8(00010111)); //R0 Left Line In
@@ -95,24 +95,24 @@ void WM8731_RX_mode(void)
 	WM8731_SendI2CCommand(B8(00000101), B8(11111111)); //R2 Left Headphone Out
 	WM8731_SendI2CCommand(B8(00000111), B8(11111111)); //R3 Right Headphone Out
 	WM8731_SendI2CCommand(B8(00001000), B8(00010110)); //R4 Analogue Audio Path Control
-	WM8731_SendI2CCommand(B8(00001010), B8(00010110)); //R5 Digital Audio Path Control
+	WM8731_SendI2CCommand(B8(00001010), B8(00010000)); //R5 Digital Audio Path Control
 	WM8731_SendI2CCommand(B8(00001100), B8(01100111)); //R6 Power Down Control
-}
+}*/
 
 // switch to mixed RX-TX mode (for LOOP)
 void WM8731_TXRX_mode(void) //loopback
 {
 	WM8731_SendI2CCommand(B8(00000101), B8(11111111)); //R2 Left Headphone Out
 	WM8731_SendI2CCommand(B8(00000111), B8(11111111)); //R3 Right Headphone Out
-	WM8731_SendI2CCommand(B8(00001010), B8(00010110)); //R5 Digital Audio Path Control
-	if (TRX.InputType_LINE)							   //line
+	WM8731_SendI2CCommand(B8(00001010), B8(00010000)); //R5 Digital Audio Path Control
+	if (TRX.InputType == TRX_INPUT_LINE)			   //line
 	{
 		WM8731_SendI2CCommand(B8(00000000), B8(00010111)); //R0 Left Line In
 		WM8731_SendI2CCommand(B8(00000010), B8(00010111)); //R1 Right Line In
 		WM8731_SendI2CCommand(B8(00001000), B8(00010010)); //R4 Analogue Audio Path Control
 		WM8731_SendI2CCommand(B8(00001100), B8(01100010)); //R6 Power Down Control, internal crystal
 	}
-	if (TRX.InputType_MIC) //mic
+	if (TRX.InputType == TRX_INPUT_MIC) //mic
 	{
 		WM8731_SendI2CCommand(B8(00000001), B8(10000000)); //R0 Left Line In
 		WM8731_SendI2CCommand(B8(00000011), B8(10000000)); //R1 Right Line In
@@ -124,7 +124,7 @@ void WM8731_TXRX_mode(void) //loopback
 void WM8731_Mute(void)
 {
 	WM8731_Muting = true;
-	
+
 	//hardware mute
 	/*for(int16_t i = 127; i >= 0; i-= 5)
 	{
@@ -139,7 +139,7 @@ void WM8731_Mute(void)
 void WM8731_UnMute(void)
 {
 	WM8731_Muting = false;
-	
+
 	//hardware unmute
 	/*for(int16_t i = 0; i <= 127; i+= 5)
 	{
@@ -153,7 +153,7 @@ void WM8731_UnMute(void)
 
 void WM8731_Beep(void)
 {
-	if(TRX.Beeper)
+	if (TRX.Beeper)
 	{
 		WM8731_Beeping = true;
 		HAL_Delay(50);
@@ -166,7 +166,7 @@ void WM8731_Init(void)
 {
 	if (WM8731_SendI2CCommand(B8(00011110), B8(00000000)) != 0) //R15 Reset Chip
 	{
-		sendToDebug_strln("[ERR] Audio codec not found");
+		println("[ERR] Audio codec not found");
 		LCD_showError("Audio codec init error", true);
 	}
 	WM8731_SendI2CCommand(B8(00000101), B8(10000000)); //R2 Left Headphone Out Mute
@@ -177,7 +177,7 @@ void WM8731_Init(void)
 	WM8731_SendI2CCommand(B8(00000000), B8(10000000)); //R0 Left Line In
 	WM8731_SendI2CCommand(B8(00000010), B8(10000000)); //R1 Right Line In
 	WM8731_SendI2CCommand(B8(00001000), B8(00010110)); //R4 Analogue Audio Path Control
-	WM8731_SendI2CCommand(B8(00001010), B8(00010110)); //R5 Digital Audio Path Control
+	WM8731_SendI2CCommand(B8(00001010), B8(00010000)); //R5 Digital Audio Path Control
 	WM8731_SendI2CCommand(B8(00001100), B8(01100111)); //R6 Power Down Control
 	WM8731_UnMute();
 }
@@ -185,6 +185,7 @@ void WM8731_Init(void)
 // RX Buffer is fully sent to the codec
 ITCM static void I2S_DMATxCplt(DMA_HandleTypeDef *hdma)
 {
+	CPULOAD_WakeUp();
 	if (((I2S_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent)->Instance == SPI3)
 	{
 		if (Processor_NeedRXBuffer) // if the audio codec did not provide data to the buffer, raise the error flag
@@ -200,6 +201,7 @@ ITCM static void I2S_DMATxCplt(DMA_HandleTypeDef *hdma)
 // RX Buffer half sent to the codec
 ITCM static void I2S_DMATxHalfCplt(DMA_HandleTypeDef *hdma)
 {
+	CPULOAD_WakeUp();
 	if (((I2S_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent)->Instance == SPI3)
 	{
 		if (Processor_NeedRXBuffer) // if the audio codec did not provide data to the buffer, raise the error flag
@@ -215,6 +217,7 @@ ITCM static void I2S_DMATxHalfCplt(DMA_HandleTypeDef *hdma)
 // TX Buffer is completely taken from the codec
 ITCM static void I2S_DMARxCplt(DMA_HandleTypeDef *hdma)
 {
+	CPULOAD_WakeUp();
 	I2S_HandleTypeDef *hi2s = (I2S_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent;
 	HAL_I2S_RxCpltCallback(hi2s);
 }
@@ -222,6 +225,7 @@ ITCM static void I2S_DMARxCplt(DMA_HandleTypeDef *hdma)
 // TX Buffer half received from the codec
 ITCM static void I2S_DMARxHalfCplt(DMA_HandleTypeDef *hdma)
 {
+	CPULOAD_WakeUp();
 	I2S_HandleTypeDef *hi2s = (I2S_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent;
 	HAL_I2S_RxHalfCpltCallback(hi2s);
 }
@@ -229,6 +233,7 @@ ITCM static void I2S_DMARxHalfCplt(DMA_HandleTypeDef *hdma)
 // DMA I2S error
 ITCM static void I2S_DMAError(DMA_HandleTypeDef *hdma)
 {
+	CPULOAD_WakeUp();
 	I2S_HandleTypeDef *hi2s = (I2S_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent; /* Derogation MISRAC2012-Rule-11.5 */
 
 	/* Disable Rx and Tx DMA Request */

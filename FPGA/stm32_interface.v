@@ -30,7 +30,7 @@ ADC_PGA,
 ADC_RAND,
 ADC_SHDN,
 ADC_DITH,
-CIC_GAIN,
+unused,
 CICFIR_GAIN,
 TX_CICFIR_GAIN,
 DAC_GAIN,
@@ -45,7 +45,8 @@ DAC_hp1,
 DAC_hp2,
 DAC_x4,
 DCDC_freq,
-TX_NCO_freq
+TX_NCO_freq,
+RX_CIC_RATE,
 );
 
 input clk_in;
@@ -81,7 +82,7 @@ output reg ADC_PGA = 0;
 output reg ADC_RAND = 0;
 output reg ADC_SHDN = 1;
 output reg ADC_DITH = 0;
-output reg unsigned [7:0] CIC_GAIN = 32;
+output reg unsigned [7:0] unused = 0;
 output reg unsigned [7:0] CICFIR_GAIN = 32;
 output reg unsigned [7:0] TX_CICFIR_GAIN = 32;
 output reg unsigned [7:0] DAC_GAIN = 32;
@@ -94,6 +95,7 @@ output reg DAC_hp1 = 0;
 output reg DAC_hp2 = 0;
 output reg DAC_x4 = 0;
 output reg DCDC_freq = 0;
+output reg unsigned [10:0] RX_CIC_RATE = 'd640;
 
 inout [7:0] DATA_BUS;
 reg   [7:0] DATA_BUS_OUT;
@@ -118,6 +120,8 @@ reg signed [15:0] ADC_MIN;
 reg signed [15:0] ADC_MAX;
 reg ADC_MINMAX_RESET;
 reg sync_reset_n = 1;
+reg unsigned [7:0] BUS_TEST;
+reg iq_overrun = 0;
 
 always @ (posedge IQ_valid)
 begin
@@ -128,7 +132,7 @@ begin
 	if(BUFFER_RX_head >= rx_buffer_length)
 		BUFFER_RX_head = 0;
 	else
-		BUFFER_RX_head = BUFFER_RX_head + 'd1;
+		BUFFER_RX_head = BUFFER_RX_head + 16'd1;
 end
 
 always @ (posedge clk_in)
@@ -178,6 +182,11 @@ begin
 			FLASH_enable = 0;
 			k = 700;
 		end
+		else if(DATA_BUS[7:0] == 'd8) //GET INFO
+		begin
+			DATA_BUS_OE = 1;
+			k = 800;
+		end
 	end
 	else if (k == 100) //GET PARAMS
 	begin
@@ -189,6 +198,16 @@ begin
 		ADC_RAND = DATA_BUS[5:5];
 		ADC_PGA = DATA_BUS[6:6];
 		preamp_enable = DATA_BUS[7:7];
+		//clear TX chain
+		if(tx == 0)
+		begin
+			I_HOLD[7:0] = 8'd0;
+			Q_HOLD[7:0] = 8'd0;
+			TX_I[31:0] = 32'd0;
+			TX_Q[31:0] = 32'd0;
+			tx_iq_valid = 1;
+		end
+		//
 		k = 101;
 	end
 	else if (k == 101)
@@ -231,11 +250,6 @@ begin
 		NCO2_freq[7:0] = DATA_BUS[7:0];
 		k = 109;
 	end
-	/*else if (k == 109)
-	begin
-		CIC_GAIN[7:0] = DATA_BUS[7:0];
-		k = 110;
-	end*/
 	else if (k == 109)
 	begin
 		CICFIR_GAIN[7:0] = DATA_BUS[7:0];
@@ -274,6 +288,16 @@ begin
 		DAC_hp2 = DATA_BUS[3:3];
 		DAC_x4 = DATA_BUS[4:4];
 		DCDC_freq = DATA_BUS[5:5];
+		
+		if(DATA_BUS[7:6] =='d0)
+			RX_CIC_RATE = 'd160;
+		else if(DATA_BUS[7:6] =='d1)
+			RX_CIC_RATE = 'd320;
+		else if(DATA_BUS[7:6] =='d2)
+			RX_CIC_RATE = 'd640;
+		else if(DATA_BUS[7:6] =='d3)
+			RX_CIC_RATE = 'd1280;
+		
 		k = 116;
 	end
 	else if (k == 116)
@@ -300,10 +324,12 @@ begin
 	begin
 		DATA_BUS_OUT[0:0] = ADC_OTR;
 		DATA_BUS_OUT[1:1] = DAC_OTR;
+		DATA_BUS_OUT[2:2] = iq_overrun;
 		k = 201;
 	end
 	else if (k == 201)
 	begin
+		iq_overrun = 0;
 		DATA_BUS_OUT[7:0] = ADC_MIN[15:8];
 		k = 202;
 	end
@@ -383,14 +409,27 @@ begin
 	end
 	else if (k == 400) //RX1 IQ
 	begin
-		REG_RX1_I[31:0] = BUFFER_RX1_I[BUFFER_RX_tail][31:0];
-		REG_RX1_Q[31:0] = BUFFER_RX1_Q[BUFFER_RX_tail][31:0];
-		REG_RX2_I[31:0] = BUFFER_RX2_I[BUFFER_RX_tail][31:0];
-		REG_RX2_Q[31:0] = BUFFER_RX2_Q[BUFFER_RX_tail][31:0];
-		if(BUFFER_RX_tail >= rx_buffer_length || BUFFER_RX_tail == BUFFER_RX_head) //догнал буффер
-			BUFFER_RX_tail = 'd0;
+		
+		if(BUFFER_RX_tail == BUFFER_RX_head) //догнал буффер
+		begin	
+			REG_RX1_I[31:0] = 'd0;
+			REG_RX1_Q[31:0] = 'd0;
+			REG_RX2_I[31:0] = 'd0;
+			REG_RX2_Q[31:0] = 'd0;
+			iq_overrun = 1;
+		end
 		else
-			BUFFER_RX_tail = BUFFER_RX_tail + 'd1;
+		begin
+			REG_RX1_I[31:0] = BUFFER_RX1_I[BUFFER_RX_tail][31:0];
+			REG_RX1_Q[31:0] = BUFFER_RX1_Q[BUFFER_RX_tail][31:0];
+			REG_RX2_I[31:0] = BUFFER_RX2_I[BUFFER_RX_tail][31:0];
+			REG_RX2_Q[31:0] = BUFFER_RX2_Q[BUFFER_RX_tail][31:0];
+			
+			if(BUFFER_RX_tail >= rx_buffer_length)
+				BUFFER_RX_tail = 0;
+			else
+				BUFFER_RX_tail = BUFFER_RX_tail + 16'd1;
+		end
 		
 		I_HOLD = REG_RX1_I;
 		Q_HOLD = REG_RX1_Q;
@@ -479,10 +518,14 @@ begin
 	end
 	else if (k == 500) //BUS TEST
 	begin
-		Q_HOLD[7:0] = DATA_BUS[7:0];
+		BUS_TEST[7:0] = DATA_BUS[7:0];
+		k = 501;
+	end
+	else if (k == 501)
+	begin
 		DATA_BUS_OE = 1;
-		DATA_BUS_OUT[7:0] = Q_HOLD[7:0];
-		k = 999;
+		DATA_BUS_OUT[7:0] = BUS_TEST[7:0];
+		k = 500;
 	end
 	else if (k == 700) //FPGA FLASH READ - SEND COMMAND
 	begin
@@ -503,6 +546,21 @@ begin
 		else
 			DATA_BUS_OUT[7:0] = FLASH_data_in[7:0];
 		k = 700;
+	end
+	else if (k == 800) //GET INFO
+	begin
+		DATA_BUS_OUT[7:0] = 'd2; //flash id 1
+		k = 801;
+	end
+	else if (k == 801)
+	begin
+		DATA_BUS_OUT[7:0] = 'd3; //flash id 2
+		k = 802;
+	end
+	else if (k == 802)
+	begin
+		DATA_BUS_OUT[7:0] = 'd1; //flash id 3
+		k = 999;
 	end
 	stage_debug=k;
 end

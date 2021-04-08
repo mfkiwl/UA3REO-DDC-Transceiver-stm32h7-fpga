@@ -15,24 +15,24 @@ When transmitting, the process occurs in the opposite order, only at the end of 
 
 * Receiving frequencies: 0 MHz - 750 MHz
 * Transmission frequencies: 0 MHz - 160 MHz
-* TX power: 5-7W (HF), 5W (VHF)
+* TX power: 7W+ (HF), 5W (VHF)
 * Two antenna inputs
 * Modulation types (TX / RX): CW, LSB, USB, AM, FM, WFM, DIGI
 * LNA, Preamplifier
 * Adjustable attenuator 0-31dB
 * Two antenna inputs
 * Band pass filters
-* ADC dynamic range 100dB
+* ADC dynamic range (16 bit) ~100dB
 * Supply voltage: 13.8V (overvoltage and polarity reversal protection)
-* Consumption current when receiving: ~ 0.65A
-* Current consumption during transmission: ~ 1.7A +
+* Consumption current when receiving: ~ 0.7A
+* Current consumption during transmission: ~ 2.5A+
 
 ## Transceiver Features
 
-* Panorama (spectrum + waterfall) 96 kHz wide
+* Panorama (spectrum + waterfall) up to 384 kHz wide
 * Panorama tweaks and themes
 * Dual receiver (mixing A + B or A&B audio in stereo)
-* Adjustable bandwidth: HPF from 0Hz to 500Hz, LPF from 300Hz to 20kHz
+* Adjustable bandwidth: HPF from 0Hz to 600Hz, LPF from 100Hz to 20kHz
 * Integrated SWR/power meter (HF)
 * Automatic and manual Notch filter
 * Switchable AGC (AGC) with adjustable attack rate
@@ -46,6 +46,7 @@ When transmitting, the process occurs in the opposite order, only at the end of 
 * WSPR Beacon
 * Equalizer TX/RX, reverber
 * SSB Scanner mode
+* Support SDHC/SDSC/SDXC memory cards up to 16Gb
 * AGC takes into account the characteristics of human hearing (K-Weighting)
 * TCXO frequency stabilization (it is possible to use an external clock source, such as GPS)
 * WiFi operation: Time synchronization, virtual CAT interface (see Scheme/WIFI-CAT-instruction.txt)
@@ -70,7 +71,7 @@ A properly assembled device does not require debugging, but if problems arise, t
 90 FGPA pin and ADC clock input - 122.88 MHz, PC9 STM32 pin - 12.288 MHz, PB10 STM32 pin - 48 kHz. <br>
 If necessary, calibrate the transceiver through the appropriate menu <br>
 WiFi module ESP-01 must have fresh firmware with SDK 3.0.4 and higher, and AT commands 1.7.4 and higher <br>
-Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
+Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C, ST7796S, RA8875+GT911
 
 ## Management
 
@@ -88,6 +89,7 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 * **PRE** - Turn on the preamplifier (LNA)
 * **PRE [clamp]** - Turn on the driver and / or amplifier ADC
 * **ATT** - Turn on the attenuator
+* **REC** - Save audio to SD card
 * **MUTE** - Mute the sound
 * **MUTE [clamp]** - Scanner mode
 * **AGC** - Turn on AGC (automatic gain control)
@@ -125,16 +127,16 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 * **RF Filters** - Hardware filter management (LPF / HPF / BPF)
 * **Two Signal tune** - Two-signal generator in TUNE mode (1 + 2kHz)
 * **Shift Interval** - Offset range SHIFT (+ -)
+* **TRX Samplerate** - Max FFT/samplerate on CW/SSB/NFM/DIGI/etc modes
+* **WFM Samplerate** - Max FFT/samplerate on WFM mode
 * **Freq Step** - Frequency step by the main encoder
 * **Freq Step FAST** - Frequency step by the main encoder in FAST mode
 * **Freq Step ENC2** - Frequency tuning step by main add. encoder
 * **Freq Step ENC2 FAST** - Frequency step by main add. encoder in FAST mode
 * **Encoder Accelerate** - Accelerate encoder on fast rates
 * **Att step, dB** - Attenuator tuning step
-* **DEBUG Console** - Output of debug and service information to USB / UART ports
-* **MIC IN** - Select the microphone input
-* **LINE IN** - Line input selection
-* **USB IN** - Select USB audio input
+* **DEBUG Type** - Output of debug and service information to USB / UART ports
+* **Input Type** - Select audio input (microphone, line in, USB)
 * **Callsign** - User callsign
 * **Locator** - User QTH locator
 * **Transverter Enable** - Enable external transverter
@@ -156,7 +158,8 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 * **MIC Reverber** - Microphone reverberator level
 * **RX EQ xxx** - Receiver equalizer levels
 * **RX AGC Speed** - AGC (automatic signal level control) response speed for reception (more-faster)
-* **TX AGC Speed** - AGC / compressor response speed for transmission (more-faster)
+* **TX Compressor Speed** - TX compressor response speed for transmission (more-faster)
+* **TX Compressor MaxGain** - Maximum comressor gain
 * **Beeper** - Beep on key press
 
 ### CW Settings
@@ -173,17 +176,27 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 
 * **FFT Zoom** - FFT spectrum zooming (x1 - 96kHz, x2 - 48kHz, x4 - 24kHz, x8 - 12kHz, x16 - 6kHz)
 * **FFT Zoom CW** - FFT spectrum zooming for CW Mode
-* **Color Theme** - Select colors theme (0 - black, 1 - white)
+* **LCD Brightness** - Set LCD brightness (not all lcd support)
+* **Color Theme** - Select colors theme (0 - black, 1 - white, 2 - black with colored frequency)
 * **Layout Theme** - Select interface theme (0 - default)
 * **FFT Speed** - FFT and waterfall speed
+* **FFT Automatic** - Automatic FFT scale
+* **FFT Sensitivity** - Top threshold of FFT sensitivity in automatic mode (30 - scale to strongest signal)
+* **FFT Manual Bottom, dBm** - Bottom FFT threshold in manual mode
+* **FFT Manual Top, dBm** - Top FFT threshold in manual mode
 * **FFT Height** - FFT and waterfall proportional height
+* **FFT Style** - FFT style: 1(gradient), 2(fill), 3(dots), 4(contour)
 * **FFT Color** - FFT and waterfall colors: 1(blue -> yellow -> red), 2(black -> yellow -> red), 3(black -> yellow -> green), 4(black -> red), 5(black -> green), 6(black -> blue), 7(black -> white)
 * **FFT Grid** - FFT and waterfall grids: 1(no grid), 2(fft grid), 3(fft+wtf grids), 4(wtf grid)
 * **FFT Background** - Gradient FFT background
 * **FFT Enabled** - Enable waterfall and FFT
+* **WTF Moving** - Mowe waterfall with frequency changing
+* **FFT Lens** - Enable FFT lens mode (magnify center of spectrum)
+* **FFT Hold Peaks** - Show peaks on FFT spectrum
+* **FFT 3D Mode** - Enable FFT 3D mode (0 - disabled, 1 - lines, 2 - pixels)
 * **FFT Compressor** - Enable FFT peak comressor
 * **FFT Averaging** - FFT burst averaging level
-* **FFT Window** - Select FFT window (Hamming / Blackman-Harris / Hanning)
+* **FFT Window** - Select FFT window (1-Dolph–Chebyshev 2-Blackman-Harris 3-Nutall 4-Blackman-Nutall 5-Hann 6-Hamming 7-No window)
 
 ### ADC / DAC Settings
 
@@ -195,15 +208,16 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 
 ### WIFI Settings
 
-* **WIFI Enabled** - Enable WiFi module
-* **WIFI Select AP** - WiFi hotspot selection
-* **WIFI Set AP Pass** - Set password for WiFi hotspot
+* **WIFI Enabled** - Enable WiFi module (need restart)
+* **WIFI Network** - WiFi hotspot selection
+* **WIFI Network Pass** - Set password for WiFi hotspot
 * **WIFI Timezone** - Time zone (for updating the time via the Internet)
 * **WIFI CAT Server** - Server for receiving CAT commands via WIFI
-* **WIFI Update firmware** - Start cloud autoupdate firmware for ESP-01 (if present)
+* **WIFI Update ESP firmware** - Start cloud autoupdate firmware for ESP-01 (if present)
 
 ### SD Card
 
+* **USB SD Card Reader** - Enable USB SD Card reader
 * **Export Settings** - Export settings and calibration data to SD card
 * **Import Settings** - Import settings and calibration data from SD card
 * **Format SD card** - Format media drive
@@ -226,8 +240,17 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 * **LPF END** - LPF filter parameters
 * **BPF x** - Bandpass filter parameters
 * **HPF START** - HPF filter parameters
-* **SWR TRANS RATE** - Adjustment of the transformation ratio of the SWR meter
-* **VCXO Freq** - Frequency adjustment of the reference oscillator
+* **SWR FWD/REF RATE** - Adjustment of the transformation ratio of the SWR meter (forward / return)
+* **VCXO Correction** - Frequency adjustment of the reference oscillator
+* **FAN Medium start** - Temperature of the PA for starting the fan at medium speed
+* **FAN Medium stop** - Temperature of the PA for stopping the fan
+* **FAN Full start** - Temperature of the PA for starting the fan at full speed
+* **MAX RF Temp** - Maximum temperature of the PA before the protection operation
+* **MAX SWR** - Maximum VSWR before protection operation
+* **FM Deviation Scale** - Set TX FM Deviation Scale
+* **TUNE Max Power** - Maximum RF power in Tune mode
+* **RTC COARSE CALIBR** - Very coarse clock crystal calibration
+* **RTC FINE CALIBR** - Clock crystal calibration, one division is 0.954 ppm
 
 ### Set Clock Time
 
@@ -236,6 +259,10 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 ### Flash update
 
 * Launch STM32 firmware update
+
+### System info
+
+* Show info about TRX
 
 ## Services
 
@@ -268,3 +295,7 @@ Supported LCD: ILI9481, ILI9486, HX8357B, HX8357C
 ### Propagination 
 
 * Show propagination statistics (from internet)
+
+### File Manager 
+
+* Show SD Card file manager
